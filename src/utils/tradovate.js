@@ -51,6 +51,51 @@ function parseTimestamp(ts) {
 }
 
 /**
+ * Convert a naive local timestamp (no timezone) from sourceTimezone to NY (America/New_York).
+ * Uses the browser Intl API — no external dependencies.
+ * @param {string} isoNoTz - "YYYY-MM-DDTHH:mm:ss"
+ * @param {string} sourceTimezone - IANA timezone name, e.g. "Europe/Berlin"
+ * @returns {string} "YYYY-MM-DDTHH:mm:ss" in NY time
+ */
+export function convertToNY(isoNoTz, sourceTimezone) {
+  if (!isoNoTz || !sourceTimezone || sourceTimezone === "America/New_York") return isoNoTz;
+  try {
+    // Treat the string as UTC to get a base Date object
+    const rawUtc = new Date(isoNoTz + "Z");
+
+    // Format rawUtc in the source timezone to get what wall-clock time that UTC instant shows there
+    const fmtParts = (tz, d) => Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        hour12: false,
+      }).formatToParts(d).map(x => [x.type, x.value])
+    );
+
+    const srcParts = fmtParts(sourceTimezone, rawUtc);
+    // Build the wall-clock Date in source timezone (treated as UTC to get a comparable ms value)
+    const srcHour = srcParts.hour === "24" ? "00" : srcParts.hour;
+    const srcWall = new Date(
+      `${srcParts.year}-${srcParts.month}-${srcParts.day}T${srcHour}:${srcParts.minute}:${srcParts.second}Z`
+    );
+
+    // sourceOffsetMs: how many ms the source timezone is ahead of UTC at this moment
+    const sourceOffsetMs = srcWall.getTime() - rawUtc.getTime();
+
+    // actualUtcMs: the real UTC instant when the CSV wall-clock time occurred in sourceTimezone
+    const actualUtcMs = rawUtc.getTime() - sourceOffsetMs;
+
+    // Format that UTC instant as NY time
+    const nyParts = fmtParts("America/New_York", new Date(actualUtcMs));
+    const nyHour = nyParts.hour === "24" ? "00" : nyParts.hour;
+    return `${nyParts.year}-${nyParts.month}-${nyParts.day}T${nyHour}:${nyParts.minute}:${nyParts.second}`;
+  } catch {
+    return isoNoTz;
+  }
+}
+
+/**
  * Parse a single CSV line respecting quoted fields.
  * @param {string} line
  * @returns {string[]}
@@ -73,10 +118,11 @@ function parseCSVLine(line) {
  * @param {string} text - Raw CSV text
  * @param {string[]} existingBuyFillIds - buyFillIds already in the journal (for dedup)
  * @param {{ micro: number, mini: number }} commissions
- * @param {number} beThresholdTicks
+ * @param {number} beThresholdUsd - Dollar amount within which a trade is classified BE
+ * @param {string} [sourceTimezone] - IANA timezone of the CSV timestamps (e.g. "Europe/Berlin")
  * @returns {{ trades: import('../types').Trade[], skipped: number, errors: string[] }}
  */
-export function parseTradovateCSV(text, existingBuyFillIds, commissions, beThresholdTicks) {
+export function parseTradovateCSV(text, existingBuyFillIds, commissions, beThresholdUsd, sourceTimezone) {
   const errors = [];
   const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 
@@ -157,9 +203,9 @@ export function parseTradovateCSV(text, existingBuyFillIds, commissions, beThres
       const avgSellPrice = rows.reduce((s, r) => s + r.sellPrice * r.qty, 0) / totalQty;
       const sellFillIds = rows.map((r) => r.sellFillId).filter(Boolean);
 
-      // Timestamps — first boughtTimestamp, last soldTimestamp
-      const boughtTimestamp = parseTimestamp(first.boughtTimestamp);
-      const soldTimestamp = parseTimestamp(rows[rows.length - 1].soldTimestamp);
+      // Timestamps — first boughtTimestamp, last soldTimestamp, converted to NY time
+      const boughtTimestamp = convertToNY(parseTimestamp(first.boughtTimestamp), sourceTimezone);
+      const soldTimestamp = convertToNY(parseTimestamp(rows[rows.length - 1].soldTimestamp), sourceTimezone);
 
       // Duration in seconds
       let durationSec = null;
@@ -189,13 +235,9 @@ export function parseTradovateCSV(text, existingBuyFillIds, commissions, beThres
       // netPnlTicks — uses actual net dollars
       const netPnlTicks = netPnlDollars / (tickValue * totalQty);
 
-      // Outcome
-      let outcome;
-      if (Math.abs(netPnlTicks) <= beThresholdTicks) {
-        outcome = "be";
-      } else {
-        outcome = netPnlTicks > 0 ? "win" : "loss";
-      }
+      // Outcome — dollar-based
+      const beUsd = beThresholdUsd ?? 50;
+      const outcome = Math.abs(netPnlDollars) <= beUsd ? "be" : netPnlDollars > 0 ? "win" : "loss";
 
       trades.push({
         fill: {

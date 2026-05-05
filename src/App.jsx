@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from "recharts";
 import { fsaSupported, hasHandle, openFile, createFile, readData, writeData, readLocalStorage, defaultData } from "./storage.js";
-import { parseTradovateCSV } from "./utils/tradovate.js";
+import { parseTradovateCSV, convertToNY } from "./utils/tradovate.js";
 import { fmtDollars, fmtTicks, fmtR as fmtRUtil, computeR, computeWinStats, computeDrawdownSeries } from "./utils/compute.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -13,6 +13,32 @@ function fmtR(n) { return fmtRUtil(n); }
 function fmtD(n) {
   if (n == null) return "—";
   return (n < 0 ? "-" : "") + "$" + Math.abs(Math.round(n)).toLocaleString();
+}
+function fmtTicksInt(n) {
+  if (n == null) return "—";
+  return (n >= 0 ? "+" : "") + Math.round(n) + "t";
+}
+
+// Direction-aware fill helpers
+function entryTimestamp(fill) {
+  return fill.direction === "Short" ? fill.soldTimestamp : fill.boughtTimestamp;
+}
+function exitTimestamp(fill) {
+  return fill.direction === "Short" ? fill.boughtTimestamp : fill.soldTimestamp;
+}
+function entryPrice(fill) {
+  return fill.direction === "Short" ? fill.avgSellPrice : fill.buyPrice;
+}
+function avgExitPrice(fill) {
+  return fill.direction === "Short" ? fill.buyPrice : fill.avgSellPrice;
+}
+
+// Compute outcome dynamically from stored dollars + current USD threshold
+function getOutcome(trade, settings) {
+  const dollars = trade.fill?.netPnlDollars ?? 0;
+  const threshold = settings?.beThresholdUsd ?? 50;
+  if (Math.abs(dollars) <= threshold) return "be";
+  return dollars > 0 ? "win" : "loss";
 }
 
 // ── Tokens ───────────────────────────────────────────────────────────────────
@@ -108,7 +134,7 @@ function Modal({title, onClose, children, footer, width=620}) {
 }
 
 // ── Trade Detail Panel ────────────────────────────────────────────────────────
-function TradeDetailPanel({ trade, strategies, tags, onSave, onClose }) {
+function TradeDetailPanel({ trade, strategies, tags, settings, onSave, onClose }) {
   const { fill = {}, journal = {} } = trade || {};
 
   function fmtDuration(sec) {
@@ -130,8 +156,8 @@ function TradeDetailPanel({ trade, strategies, tags, onSave, onClose }) {
 
   const outcomeColor = (oc) =>
     oc === "win" ? T.green : oc === "loss" ? T.red : T.yellow;
-  const oc = fill.outcome;
-  const pnlColor = oc ? outcomeColor(oc) : T.muted;
+  const oc = getOutcome(trade, settings);
+  const pnlColor = outcomeColor(oc);
 
   const [tagInput, setTagInput] = useState("");
 
@@ -160,7 +186,7 @@ function TradeDetailPanel({ trade, strategies, tags, onSave, onClose }) {
     updateJournal({ tags: (journal.tags || []).filter(x => x !== tag) });
   }
 
-  const date = fill.boughtTimestamp ? fill.boughtTimestamp.slice(0, 10) : "—";
+  const date = entryTimestamp(fill) ? entryTimestamp(fill).slice(0, 10) : "—";
   const symbol = fill.symbol || "—";
   const direction = fill.direction || "—";
 
@@ -224,12 +250,12 @@ function TradeDetailPanel({ trade, strategies, tags, onSave, onClose }) {
             {/* Entry price */}
             <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
               <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Entry price</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{fill.buyPrice ?? "—"}</div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{entryPrice(fill) ?? "—"}</div>
             </div>
             {/* Avg exit */}
             <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
               <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Avg exit</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{fill.avgSellPrice ?? "—"}</div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{avgExitPrice(fill) ?? "—"}</div>
             </div>
             {/* Gross P&L */}
             <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
@@ -260,13 +286,13 @@ function TradeDetailPanel({ trade, strategies, tags, onSave, onClose }) {
             </div>
             {/* Entry time */}
             <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Entry time</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{timeOnly(fill.boughtTimestamp)}</div>
+              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Entry time (NY)</div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{timeOnly(entryTimestamp(fill))}</div>
             </div>
             {/* Exit time */}
             <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Exit time</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{timeOnly(fill.soldTimestamp)}</div>
+              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Exit time (NY)</div>
+              <div style={{ fontSize: 13, fontWeight: 500 }}>{timeOnly(exitTimestamp(fill))}</div>
             </div>
           </div>
 
@@ -373,7 +399,7 @@ function TradeDetailPanel({ trade, strategies, tags, onSave, onClose }) {
 }
 
 // ── Account Form ──────────────────────────────────────────────────────────────
-const ACCT_DEFAULTS = { id:"", name:"", firmId:"", type:"eval", broker:"Tradovate", firm:"Apex", startingBalance:50000, drawdownBuffer:2000, lockLevel:null };
+const ACCT_DEFAULTS = { id:"", name:"", firmId:"", type:"eval", broker:"Tradovate", firm:"Apex", startingBalance:50000, drawdownBuffer:2000, lockLevel:null, profitTarget:3000 };
 
 function AccountForm({acct, onSave, onClose}) {
   const [f,setF]=useState({...ACCT_DEFAULTS,...(acct||{})});
@@ -387,6 +413,7 @@ function AccountForm({acct, onSave, onClose}) {
       startingBalance: +f.startingBalance,
       drawdownBuffer: +f.drawdownBuffer,
       lockLevel: lockNum === 0 ? null : lockNum,
+      profitTarget: +f.profitTarget || 3000,
     });
   }
   return (
@@ -405,6 +432,7 @@ function AccountForm({acct, onSave, onClose}) {
         <Input label="Starting balance ($)" type="number" value={f.startingBalance} onChange={e=>s("startingBalance",e.target.value)}/>
         <Input label="Trailing drawdown buffer ($)" type="number" value={f.drawdownBuffer} onChange={e=>s("drawdownBuffer",e.target.value)}/>
         <Input label="DD lock level ($) — leave blank for eval (no lock)" type="number" value={f.lockLevel ?? ""} onChange={e=>s("lockLevel",e.target.value===""?null:e.target.value)} placeholder="e.g. 50100"/>
+        <Input label="Profit target ($)" type="number" value={f.profitTarget ?? 3000} onChange={e=>s("profitTarget",e.target.value)} placeholder="e.g. 3000"/>
       </div>
     </Modal>
   );
@@ -428,7 +456,8 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, onImport
         e.target.result,
         existingBuyFillIds || [],
         settings.commissions,
-        settings.beThresholdTicks
+        settings.beThresholdUsd ?? 50,
+        settings.sourceTimezone ?? "Europe/Berlin"
       );
       if (result.errors.length > 0 && result.trades.length === 0) {
         setParseErr(result.errors[0]);
@@ -575,13 +604,13 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, onImport
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-function Dashboard({trades, accounts, strategies=[]}) {
-  const wins=trades.filter(t=>t.fill?.outcome==="win");
-  const losses=trades.filter(t=>t.fill?.outcome==="loss");
-  const bes=trades.filter(t=>t.fill?.outcome==="be");
+function Dashboard({trades, accounts, strategies=[], settings={}}) {
+  const wins=trades.filter(t=>getOutcome(t,settings)==="win");
+  const losses=trades.filter(t=>getOutcome(t,settings)==="loss");
+  const bes=trades.filter(t=>getOutcome(t,settings)==="be");
   const netDollars=trades.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
   const netTicks=trades.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0);
-  const stats=computeWinStats(trades);
+  const stats=computeWinStats(trades, settings.beThresholdUsd ?? 50);
   const grossWins=wins.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
   const grossLoss=Math.abs(losses.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0));
   const pf=grossLoss>0?grossWins/grossLoss:null;
@@ -622,22 +651,33 @@ function Dashboard({trades, accounts, strategies=[]}) {
   const fd=new Date(yr,mo,1).getDay();
   const calDim=new Date(yr,mo+1,0).getDate();
 
-  const Metric=({label, value, color=T.text, sub})=>(
-    <div style={{background:T.surface,borderRadius:"var(--border-radius-md)",padding:"12px 14px"}}>
-      <div style={{fontSize:11,color:T.hint,marginBottom:4}}>{label}</div>
+  const [tooltip,setTooltip]=useState(null);
+  const Metric=({label, value, color=T.text, sub, info})=>(
+    <div style={{background:T.surface,borderRadius:"var(--border-radius-md)",padding:"12px 14px",position:"relative"}}>
+      <div style={{fontSize:11,color:T.hint,marginBottom:4,display:"flex",alignItems:"center",gap:4}}>
+        {label}
+        {info&&<span
+          style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:"50%",border:`0.5px solid ${T.border2}`,fontSize:9,cursor:"pointer",color:T.hint,lineHeight:1,flexShrink:0}}
+          onMouseEnter={e=>{const r=e.currentTarget.getBoundingClientRect();setTooltip({text:info,x:r.left,y:r.bottom+4});}}
+          onMouseLeave={()=>setTooltip(null)}
+        >?</span>}
+      </div>
       <div style={{fontSize:22,fontWeight:500,color}}>{value}</div>
       {sub&&<div style={{fontSize:11,color:T.hint,marginTop:2}}>{sub}</div>}
     </div>
   );
 
+  const avgProfitableTicks=wins.length>0?wins.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0)/wins.length:null;
+
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {tooltip&&<div style={{position:"fixed",left:tooltip.x,top:tooltip.y,zIndex:9999,background:T.card,border:`0.5px solid ${T.border2}`,borderRadius:6,padding:"6px 10px",fontSize:11,color:T.muted,maxWidth:220,pointerEvents:"none",boxShadow:"0 4px 12px rgba(0,0,0,0.2)"}}>{tooltip.text}</div>}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
         <Metric label="Net P&L ($)" value={fmtDollars(netDollars)} color={netDollars>=0?T.green:T.red} sub={`${trades.length} trades`}/>
-        <Metric label="Net P&L (ticks)" value={fmtTicks(netTicks)} color={netTicks>=0?T.green:T.red}/>
-        <Metric label="Win %" value={stats.winPct!=null?stats.winPct.toFixed(0)+"%":"—"} color={stats.winPct==null?T.hint:stats.winPct>=50?T.green:stats.winPct>=40?T.yellow:T.red} sub={`${stats.wins}W / ${stats.losses}L`}/>
-        <Metric label="BE %" value={stats.bePct!=null?stats.bePct.toFixed(0)+"%":"—"} color={T.yellow} sub={`${stats.bes} BE`}/>
-        <Metric label="Profit factor" value={pf!=null?pf.toFixed(2):"—"} color={pf==null?T.hint:pf>=1.5?T.green:pf>=1?T.yellow:T.red}/>
+        <Metric label="Avg win (ticks)" value={avgProfitableTicks!=null?fmtTicks(avgProfitableTicks):"—"} color={T.green} sub="avg of winning trades" info="Average net ticks of trades classified as wins. Use this as a size target for new trades."/>
+        <Metric label="Win %" value={stats.winPct!=null?stats.winPct.toFixed(0)+"%":"—"} color={stats.winPct==null?T.hint:stats.winPct>=50?T.green:stats.winPct>=40?T.yellow:T.red} sub={`${stats.wins}W / ${stats.losses}L`} info="Wins ÷ (wins + losses). BE trades are excluded from the denominator."/>
+        <Metric label="BE %" value={stats.bePct!=null?stats.bePct.toFixed(0)+"%":"—"} color={T.yellow} sub={`${stats.bes} BE`} info={`Trades within ±$${settings.beThresholdUsd??50} net P&L — classified as break-even.`}/>
+        <Metric label="Profit factor" value={pf!=null?pf.toFixed(2):"—"} color={pf==null?T.hint:pf>=1.5?T.green:pf>=1?T.yellow:T.red} info="Gross profit of winning trades ÷ gross loss of losing trades. Above 1.5 is strong."/>
         <Metric label="Trades today" value={todayCount} color={T.text}/>
       </div>
 
@@ -713,11 +753,18 @@ function Dashboard({trades, accounts, strategies=[]}) {
         <Card>
           <CardHead title="Accounts"/>
           <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",gap:10}}>
+            {accounts.length===0&&<div style={{fontSize:12,color:T.hint,textAlign:"center",padding:"12px 0"}}>No accounts yet</div>}
             {accounts.map(a=>{
-              const pnl=a.currentBalance-a.startingBalance;
-              const buf=a.currentBalance-a.currentDrawdown;
-              const bufStart=a.startingBalance-a.startingDrawdown;
-              const pct=bufStart>0?Math.max(0,Math.min(100,buf/bufStart*100)):0;
+              const acctTrades=trades.filter(t=>t.journal?.accountId===a.id);
+              const netPnl=acctTrades.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
+              const currentBalance=a.startingBalance+netPnl;
+              const pnl=currentBalance-a.startingBalance;
+              const showDD=a.type==="eval"||a.type==="pa";
+              const series=showDD?computeDrawdownSeries(a,acctTrades):[];
+              const last=series.length>0?series[series.length-1]:null;
+              const floor=last?last.floor:(a.startingBalance-(a.drawdownBuffer||0));
+              const buf=currentBalance-floor;
+              const pct=a.drawdownBuffer>0?Math.max(0,Math.min(100,buf/a.drawdownBuffer*100)):null;
               return (
                 <div key={a.id} style={{padding:"10px 12px",background:T.surface,borderRadius:8,border:`0.5px solid ${T.border}`}}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
@@ -730,15 +777,17 @@ function Dashboard({trades, accounts, strategies=[]}) {
                       <div style={{fontSize:9,color:T.hint}}>P&L</div>
                     </div>
                   </div>
-                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
-                    {[["Balance",fmtD(a.currentBalance),T.text],["DD Floor",fmtD(a.currentDrawdown),T.red],["Buffer",fmtD(buf),buf<1000?T.red:T.yellow]].map(([l,v,c])=>(
+                  {showDD&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                    {[["Balance",fmtD(currentBalance),T.text],["DD Floor",fmtD(floor),T.red],["Buffer",fmtD(buf),buf<1000?T.red:T.yellow]].map(([l,v,c])=>(
                       <div key={l}><div style={{fontSize:9,color:T.hint,marginBottom:2}}>{l}</div><div style={{fontSize:12,fontWeight:500,color:c}}>{v}</div></div>
                     ))}
-                  </div>
-                  <div style={{height:4,background:T.border,borderRadius:2,overflow:"hidden"}}>
-                    <div style={{height:"100%",width:pct+"%",background:pct>50?T.green:pct>25?T.yellow:T.red,borderRadius:2,transition:"width 0.3s"}}/>
-                  </div>
-                  <div style={{fontSize:9,color:T.hint,marginTop:3,textAlign:"right"}}>{pct.toFixed(0)}% buffer remaining</div>
+                  </div>}
+                  {pct!=null&&<>
+                    <div style={{height:4,background:T.border,borderRadius:2,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:pct+"%",background:pct>50?T.green:pct>25?T.yellow:T.red,borderRadius:2,transition:"width 0.3s"}}/>
+                    </div>
+                    <div style={{fontSize:9,color:T.hint,marginTop:3,textAlign:"right"}}>{pct.toFixed(0)}% buffer remaining</div>
+                  </>}
                 </div>
               );
             })}
@@ -750,7 +799,7 @@ function Dashboard({trades, accounts, strategies=[]}) {
 }
 
 // ── Trade Log ─────────────────────────────────────────────────────────────────
-function TradeLog({trades, accounts, onEdit, onDelete}) {
+function TradeLog({trades, accounts, settings={}, onEdit, onDelete}) {
   const [filters,setFilters]=useState({strategy:"",direction:"",account:"",search:""});
   const setF=(k,v)=>setFilters(f=>({...f,[k]:v}));
   const aMap=Object.fromEntries(accounts.map(a=>[a.id,a.name]));
@@ -810,6 +859,7 @@ function TradeLog({trades, accounts, onEdit, onDelete}) {
             <table style={{width:"100%",borderCollapse:"collapse"}}>
               <thead><tr>
                 <TH>Date</TH>
+                <TH>Time (NY)</TH>
                 <TH>Dir</TH>
                 <TH>Symbol</TH>
                 <TH>Qty</TH>
@@ -825,16 +875,19 @@ function TradeLog({trades, accounts, onEdit, onDelete}) {
                 {filtered.map((t,i)=>{
                   const f=t.fill||{};
                   const j=t.journal||{};
-                  const oc=f.outcome;
-                  const pnlColor=oc?outcomeColor(oc):T.muted;
+                  const oc=getOutcome(t,settings);
+                  const pnlColor=outcomeColor(oc);
+                  const ets=entryTimestamp(f);
+                  const timeStr=ets&&ets.includes("T")?ets.split("T")[1].slice(0,5):"—";
                   return (
                     <tr key={f.buyFillId||i} style={{cursor:"pointer"}} onClick={()=>onEdit(t)}>
-                      <TD style={{whiteSpace:"nowrap"}}>{f.boughtTimestamp?f.boughtTimestamp.slice(0,10):"—"}</TD>
+                      <TD style={{whiteSpace:"nowrap"}}>{ets?ets.slice(0,10):"—"}</TD>
+                      <TD style={{whiteSpace:"nowrap",color:T.muted,fontSize:11}}>{timeStr}</TD>
                       <TD><span style={{fontWeight:500,color:f.direction==="Long"?T.green:T.red}}>{f.direction==="Long"?"▲ L":f.direction==="Short"?"▼ S":"—"}</span></TD>
                       <TD style={{fontWeight:500}}>{f.symbol||"—"}</TD>
                       <TD style={{color:T.muted}}>{f.qty??"—"}</TD>
                       <TD style={{color:pnlColor,fontWeight:500}}>{fmtDollars(f.netPnlDollars)}</TD>
-                      <TD style={{color:pnlColor}}>{fmtTicks(f.netPnlTicks)}</TD>
+                      <TD style={{color:pnlColor}}>{fmtTicksInt(f.netPnlTicks)}</TD>
                       <TD style={{color:j.rCollected!=null?(j.rCollected>0.05?T.green:j.rCollected<-0.05?T.red:T.yellow):T.hint}}>{j.rCollected!=null?fmtR(j.rCollected):"—"}</TD>
                       <TD>{j.strategy?<Tag s={j.strategy}/>:"—"}</TD>
                       <TD style={{color:T.muted,fontSize:11}}>{aMap[j.accountId]||"—"}</TD>
@@ -854,14 +907,14 @@ function TradeLog({trades, accounts, onEdit, onDelete}) {
 }
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
-function Analytics({trades, strategies=[]}) {
+function Analytics({trades, strategies=[], settings={}}) {
   const [dim,setDim]=useState("strategy");
   const total=trades.length;
 
   // Summary metrics using netPnlDollars
-  const wTrades=trades.filter(t=>t.fill?.outcome==="win");
-  const lTrades=trades.filter(t=>t.fill?.outcome==="loss");
-  const beTrades=trades.filter(t=>t.fill?.outcome==="be");
+  const wTrades=trades.filter(t=>getOutcome(t,settings)==="win");
+  const lTrades=trades.filter(t=>getOutcome(t,settings)==="loss");
+  const beTrades=trades.filter(t=>getOutcome(t,settings)==="be");
   const wins=wTrades.length;
   const losses=lTrades.length;
   const bes=beTrades.length;
@@ -878,7 +931,7 @@ function Analytics({trades, strategies=[]}) {
     const db=b.fill?.boughtTimestamp||"";
     return da>db?1:-1;
   }).forEach(t=>{
-    const oc=t.fill?.outcome;
+    const oc=getOutcome(t,settings);
     if(oc==="win"){curS=curS>0?curS+1:1;maxWS=Math.max(maxWS,curS);}
     else if(oc==="loss"){curS=curS<0?curS-1:-1;maxLS=Math.max(maxLS,-curS);}
     else curS=0;
@@ -888,9 +941,9 @@ function Analytics({trades, strategies=[]}) {
   function grpByField(accessor, labels) {
     return labels.map(l=>{
       const g=trades.filter(t=>accessor(t)===l);
-      const w=g.filter(t=>t.fill?.outcome==="win").length;
-      const lo=g.filter(t=>t.fill?.outcome==="loss").length;
-      const be=g.filter(t=>t.fill?.outcome==="be").length;
+      const w=g.filter(t=>getOutcome(t,settings)==="win").length;
+      const lo=g.filter(t=>getOutcome(t,settings)==="loss").length;
+      const be=g.filter(t=>getOutcome(t,settings)==="be").length;
       const nd=g.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
       const nt=g.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0);
       return {name:l,count:g.length,wins:w,losses:lo,bes:be,winPct:g.length?w/g.length*100:0,netDollars:nd,netTicks:nt};
@@ -903,9 +956,9 @@ function Analytics({trades, strategies=[]}) {
       try{const d=new Date(t.fill?.boughtTimestamp||"");const m={1:"Mon",2:"Tue",3:"Wed",4:"Thu",5:"Fri"};return m[d.getDay()]===day;}
       catch{return false;}
     });
-    const w=g.filter(t=>t.fill?.outcome==="win").length;
-    const lo=g.filter(t=>t.fill?.outcome==="loss").length;
-    const be=g.filter(t=>t.fill?.outcome==="be").length;
+    const w=g.filter(t=>getOutcome(t,settings)==="win").length;
+    const lo=g.filter(t=>getOutcome(t,settings)==="loss").length;
+    const be=g.filter(t=>getOutcome(t,settings)==="be").length;
     const nd=g.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
     const nt=g.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0);
     return {name:day,count:g.length,wins:w,losses:lo,bes:be,winPct:g.length?w/g.length*100:0,netDollars:nd,netTicks:nt};
@@ -1009,7 +1062,7 @@ function Analytics({trades, strategies=[]}) {
 // ── Accounts Page ─────────────────────────────────────────────────────────────
 const TYPE_LABELS = { eval:"Eval", pa:"PA", personal:"Personal" };
 
-function AccountCard({a, trades, onEdit, onDelete}) {
+function AccountCard({a, trades, settings={}, onEdit, onDelete}) {
   const accountTrades = trades.filter(t => t.journal?.accountId === a.id);
   const netPnl = accountTrades.reduce((s,t) => s + (t.fill?.netPnlDollars||0), 0);
   const currentBalance = a.startingBalance + netPnl;
@@ -1028,8 +1081,8 @@ function AccountCard({a, trades, onEdit, onDelete}) {
   }
 
   // Stats
-  const wins = accountTrades.filter(t => t.fill?.outcome === "win").length;
-  const losses = accountTrades.filter(t => t.fill?.outcome === "loss").length;
+  const wins = accountTrades.filter(t => getOutcome(t, settings) === "win").length;
+  const losses = accountTrades.filter(t => getOutcome(t, settings) === "loss").length;
   const decisive = wins + losses;
   const winPct = decisive > 0 ? (wins / decisive * 100) : null;
 
@@ -1108,7 +1161,13 @@ function AccountCard({a, trades, onEdit, onDelete}) {
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
                     <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{fontSize:9,fill:T.hint}} tickFormatter={fmtDate} interval="preserveStartEnd"/>
-                    <YAxis domain={["auto","auto"]} hide/>
+                    <YAxis
+                      domain={[a.startingBalance-(a.drawdownBuffer||2000)-200, a.startingBalance+(a.profitTarget||3000)+200]}
+                      tickLine={false} axisLine={false}
+                      tick={{fontSize:9,fill:T.hint}}
+                      tickFormatter={v=>"$"+(v/1000).toFixed(1)+"k"}
+                      width={42}
+                    />
                     <Tooltip content={<ChartTooltip/>}/>
                     {a.lockLevel != null && (
                       <ReferenceLine y={a.lockLevel} stroke={T.indigo} strokeDasharray="3 3" strokeWidth={1}/>
@@ -1144,7 +1203,7 @@ function AccountCard({a, trades, onEdit, onDelete}) {
   );
 }
 
-function AccountsPage({accounts, trades, onAdd, onEdit, onDelete}) {
+function AccountsPage({accounts, trades, settings={}, onAdd, onEdit, onDelete}) {
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -1153,7 +1212,7 @@ function AccountsPage({accounts, trades, onAdd, onEdit, onDelete}) {
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(360px,1fr))",gap:16}}>
         {accounts.map(a=>(
-          <AccountCard key={a.id} a={a} trades={trades} onEdit={onEdit} onDelete={onDelete}/>
+          <AccountCard key={a.id} a={a} trades={trades} settings={settings} onEdit={onEdit} onDelete={onDelete}/>
         ))}
         {accounts.length===0&&(
           <Card style={{padding:60,textAlign:"center",gridColumn:"1/-1"}}>
@@ -1177,7 +1236,8 @@ function SettingsPage({data, onDataChange}) {
   const settings = data.settings || {};
   const strategies = settings.strategies || [];
   const tags = settings.tags || [];
-  const beThreshold = settings.beThresholdTicks ?? 3;
+  const beThresholdUsd = settings.beThresholdUsd ?? 50;
+  const sourceTimezone = settings.sourceTimezone ?? "Europe/Berlin";
   const commissions = settings.commissions || { micro: 1.03, mini: 3.50 };
 
   function patchSettings(patch) {
@@ -1232,14 +1292,64 @@ function SettingsPage({data, onDataChange}) {
         <CardHead title="Trade classification"/>
         <div style={{padding:"14px",display:"flex",flexDirection:"column",gap:12}}>
           <div>
-            <label style={labelStyle}>Break-even threshold (ticks) — trades within ±N ticks of entry are classified as BE</label>
+            <label style={labelStyle}>Break-even threshold ($) — trades within ±$X net P&L are classified as BE</label>
             <input
-              type="number" min={0} step={1}
-              value={beThreshold}
-              onChange={e=>patchSettings({beThresholdTicks:Math.max(0,parseInt(e.target.value)||0)})}
+              type="number" min={0} step={5}
+              value={beThresholdUsd}
+              onChange={e=>patchSettings({beThresholdUsd:Math.max(0,parseFloat(e.target.value)||0)})}
               style={numberInputStyle}
             />
           </div>
+          <div style={{fontSize:11,color:T.hint,lineHeight:1.7}}>This applies dynamically to all trades — no re-import needed when you change it.</div>
+        </div>
+      </Card>
+
+      {/* Section 2b: Import settings */}
+      <Card>
+        <CardHead title="Import settings"/>
+        <div style={{padding:"14px",display:"flex",flexDirection:"column",gap:12}}>
+          <div>
+            <label style={labelStyle}>Your local timezone — Tradovate CSV timestamps will be converted to NY time on import</label>
+            <select
+              value={sourceTimezone}
+              onChange={e=>patchSettings({sourceTimezone:e.target.value})}
+              style={{...inputStyle,width:"auto"}}
+            >
+              <option value="Europe/London">Europe/London (GMT/BST)</option>
+              <option value="Europe/Berlin">Europe/Berlin (CET/CEST)</option>
+              <option value="Europe/Paris">Europe/Paris (CET/CEST)</option>
+              <option value="America/Chicago">America/Chicago (CST/CDT)</option>
+              <option value="America/Denver">America/Denver (MST/MDT)</option>
+              <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</option>
+              <option value="America/New_York">America/New_York (already NY time)</option>
+            </select>
+          </div>
+          <div style={{fontSize:11,color:T.hint,lineHeight:1.7}}>Only affects new imports. Use the button below to fix timestamps on existing trades.</div>
+          <button
+            style={btn("ghost")}
+            onClick={()=>{
+              let count=0;
+              const updated = data.trades.map(t=>{
+                const f=t.fill;
+                if(!f) return t;
+                // Heuristic: skip if already looks like NY market hours (before 14:00 local)
+                const ts = f.boughtTimestamp||"";
+                const timeH = ts.includes("T") ? parseInt(ts.split("T")[1].slice(0,2),10) : 25;
+                if(timeH < 14) return t;
+                count++;
+                return {
+                  ...t,
+                  fill:{
+                    ...f,
+                    boughtTimestamp: convertToNY(f.boughtTimestamp, sourceTimezone),
+                    soldTimestamp: convertToNY(f.soldTimestamp, sourceTimezone),
+                  }
+                };
+              });
+              onDataChange({...data, trades:updated});
+              toast_(`Converted ${count} trade timestamps ✓`);
+            }}
+          >Convert existing timestamps to NY time</button>
         </div>
       </Card>
 
@@ -1505,10 +1615,10 @@ export default function App() {
 
       {/* Content */}
       <div style={{padding:"20px",maxWidth:1100,margin:"0 auto"}}>
-        {page==="dashboard"&&<Dashboard trades={data.trades} accounts={data.accounts} strategies={data.settings?.strategies||[]}/>}
-        {page==="trades"&&<TradeLog trades={data.trades} accounts={data.accounts} onEdit={setDetailTrade} onDelete={deleteTrade}/>}
-        {page==="analytics"&&<Analytics trades={data.trades} strategies={data.settings?.strategies||[]}/>}
-        {page==="accounts"&&<AccountsPage accounts={data.accounts} trades={data.trades} onAdd={()=>{setEditItem(null);setModal("account");}} onEdit={a=>{setEditItem(a);setModal("account");}} onDelete={deleteAccount}/>}
+        {page==="dashboard"&&<Dashboard trades={data.trades} accounts={data.accounts} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
+        {page==="trades"&&<TradeLog trades={data.trades} accounts={data.accounts} settings={data.settings||{}} onEdit={setDetailTrade} onDelete={deleteTrade}/>}
+        {page==="analytics"&&<Analytics trades={data.trades} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
+        {page==="accounts"&&<AccountsPage accounts={data.accounts} trades={data.trades} settings={data.settings||{}} onAdd={()=>{setEditItem(null);setModal("account");}} onEdit={a=>{setEditItem(a);setModal("account");}} onDelete={deleteAccount}/>}
         {page==="settings"&&<SettingsPage data={data} onDataChange={setData}/>}
       </div>
 
@@ -1519,6 +1629,7 @@ export default function App() {
           trade={detailTrade}
           strategies={data.settings?.strategies||[]}
           tags={data.settings?.tags||[]}
+          settings={data.settings||{}}
           onSave={(updated)=>{
             setDetailTrade(updated);
             setData({...data,trades:data.trades.map(t=>t.fill?.buyFillId===updated.fill?.buyFillId?updated:t)});

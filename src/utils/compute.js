@@ -36,14 +36,14 @@ export function computeR(pnlTicks, riskTicks) {
 }
 
 /**
- * Compute outcome for a trade given netPnlTicks and beThresholdTicks.
- * @param {number} netPnlTicks
- * @param {number} beThresholdTicks
+ * Compute outcome for a trade given netPnlDollars and beThresholdUsd.
+ * @param {number} netPnlDollars
+ * @param {number} beThresholdUsd
  * @returns {"win"|"be"|"loss"}
  */
-export function computeOutcome(netPnlTicks, beThresholdTicks) {
-  if (Math.abs(netPnlTicks) <= beThresholdTicks) return "be";
-  return netPnlTicks > 0 ? "win" : "loss";
+export function computeOutcome(netPnlDollars, beThresholdUsd) {
+  if (Math.abs(netPnlDollars) <= beThresholdUsd) return "be";
+  return netPnlDollars > 0 ? "win" : "loss";
 }
 
 /**
@@ -84,12 +84,18 @@ export function fmtR(n) {
  * Compute win%, BE%, loss% stats for a set of trades.
  * BE trades are excluded from the win%/loss% denominator.
  * @param {object[]} trades
+ * @param {number} [beThresholdUsd=50]
  * @returns {{ wins: number, losses: number, bes: number, total: number, winPct: number|null, bePct: number|null, lossPct: number|null }}
  */
-export function computeWinStats(trades) {
-  const wins = trades.filter((t) => t.fill.outcome === "win").length;
-  const losses = trades.filter((t) => t.fill.outcome === "loss").length;
-  const bes = trades.filter((t) => t.fill.outcome === "be").length;
+export function computeWinStats(trades, beThresholdUsd = 50) {
+  const oc = (t) => {
+    const d = t.fill?.netPnlDollars ?? 0;
+    if (Math.abs(d) <= beThresholdUsd) return "be";
+    return d > 0 ? "win" : "loss";
+  };
+  const wins = trades.filter((t) => oc(t) === "win").length;
+  const losses = trades.filter((t) => oc(t) === "loss").length;
+  const bes = trades.filter((t) => oc(t) === "be").length;
   const total = trades.length;
   const decisive = wins + losses;
   return {
