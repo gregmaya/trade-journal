@@ -1280,11 +1280,14 @@ function SettingsPage({data, onDataChange}) {
   }
   function exportCSV(){
     const h=["boughtTimestamp","soldTimestamp","symbol","direction","qty","grossPnlDollars","netPnlDollars","netPnlTicks","strategy","riskTicks","rCollected","accountId","tags","notes","tradingViewUrl","rating"];
-    const rows=data.trades.map(t=>h.map(k=>{
-      const v=t[k];
-      if(Array.isArray(v)) return JSON.stringify(v.join("|"));
-      return JSON.stringify(v??'');
-    }).join(","));
+    const rows=data.trades.map(t=>{
+      const flat={...t.fill,...t.journal};
+      return h.map(k=>{
+        const v=flat[k];
+        if(Array.isArray(v)) return JSON.stringify(v.join("|"));
+        return JSON.stringify(v??'');
+      }).join(",");
+    });
     const b=new Blob([[h.join(","),...rows].join("\n")],{type:"text/csv"});
     const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="trades_export.csv";a.click();toast_("CSV exported ✓");
   }
