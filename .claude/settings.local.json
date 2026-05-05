@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(node --input-type=module)",
+      "Bash(node --input-type=module --experimental-vm-modules)",
+      "Bash(npx --yes acorn --ecma2020 --module src/App.jsx)",
+      "Bash(npx acorn *)",
+      "Bash(node -e ' *)",
+      "Bash(awk 'NR>=562 && NR<=1000' /Users/nfi/dev/trade-journal/src/App.jsx)",
+      "Bash(npx --yes acorn --ecma2022 --module src/App.jsx)",
+      "Bash(npx vite *)",
+      "Bash(git init *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}

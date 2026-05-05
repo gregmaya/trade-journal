@@ -1,0 +1,69 @@
+:root {
+  --color-background-tertiary:  #0a0a0f;   /* page background */
+  --color-background-secondary: #111118;   /* surface / hover states */
+  --color-background-primary:   #16161f;   /* cards */
+  --color-border-tertiary:      #1e1e2e;   /* subtle dividers */
+  --color-border-secondary:     #2a2a3d;   /* card borders */
+  --color-text-primary:         #e2e2f0;   /* primary text */
+  --color-text-secondary:       #8888aa;   /* muted text */
+  --color-text-tertiary:        #4a4a6a;   /* hints / placeholders */
+  --border-radius-lg:           10px;
+  --border-radius-md:           7px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--color-background-tertiary);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Inputs, selects, textareas */
+input, select, textarea {
+  background: var(--color-background-secondary);
+  border: 0.5px solid var(--color-border-secondary);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--color-text-secondary);
+}
+input::placeholder, textarea::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border-secondary); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-tertiary); }
+
+/* Table base */
+table { border-collapse: collapse; }
+
+/* Selection */
+::selection { background: rgba(99,102,241,0.3); }
+
+/* Recharts tooltip fix — ensure dark bg */
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: var(--color-background-primary) !important;
+  border: 0.5px solid var(--color-border-secondary) !important;
+  border-radius: 6px !important;
+}
+
+/* Screen reader only utility */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
