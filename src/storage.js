@@ -78,7 +78,7 @@ export function defaultData() {
     trades: [],
     accounts: [],
     settings: {
-      strategies: ["ORB", "ILM", "Model", "NONE"],
+      strategies: ["ORB", "ILM", "IMPULSE TRADE", "None"],
       tags: [],
       beThresholdTicks: 3,
       commissions: { micro: 1.03, mini: 3.50 },

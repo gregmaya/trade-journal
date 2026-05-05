@@ -53,7 +53,7 @@ const CardHead = ({title, action}) => (
 );
 
 function Tag({s}) {
-  const colors = {ORB:[T.green,T.greenBg], ILM:[T.indigo,T.indigoBg], Model:[T.yellow,T.yellowBg], NONE:[T.hint,"transparent"]};
+  const colors = {ORB:[T.green,T.greenBg], ILM:[T.indigo,T.indigoBg], "IMPULSE TRADE":[T.yellow,T.yellowBg], None:[T.hint,"transparent"]};
   const [color,bg] = colors[s]||[T.hint,"transparent"];
   return <span style={{fontSize:10, fontWeight:500, padding:"2px 7px", borderRadius:4, background:bg, color, border:`0.5px solid ${color}40`}}>{s}</span>;
 }
@@ -76,6 +76,19 @@ function Select({label, children, ...props}) {
     {label&&<label style={{fontSize:11,color:T.hint}}>{label}</label>}
     <select style={{width:"100%"}} {...props}>{children}</select>
   </div>;
+}
+
+function LBL({children}) {
+  return <label style={{fontSize:11,color:T.hint,marginBottom:4,display:"block"}}>{children}</label>;
+}
+function Field({label, children}) {
+  return <div style={{display:"flex",flexDirection:"column",gap:2}}><LBL>{label}</LBL>{children}</div>;
+}
+function TH({children,style={}}) {
+  return <th style={{textAlign:"left",padding:"7px 10px",borderBottom:`0.5px solid ${T.border}`,color:T.hint,fontWeight:500,fontSize:10,textTransform:"uppercase",letterSpacing:"0.6px",whiteSpace:"nowrap",...style}}>{children}</th>;
+}
+function TD({children,style={}}) {
+  return <td style={{padding:"7px 10px",borderBottom:`0.5px solid ${T.border}`,fontSize:12,...style}}>{children}</td>;
 }
 
 // ── Modal wrapper ─────────────────────────────────────────────────────────────
@@ -146,16 +159,6 @@ function TradeDetailPanel({ trade, strategies, tags, onSave, onClose }) {
   function removeTag(tag) {
     updateJournal({ tags: (journal.tags || []).filter(x => x !== tag) });
   }
-
-  const LBL = ({ children }) => (
-    <label style={{ fontSize: 11, color: T.hint, marginBottom: 4, display: "block" }}>{children}</label>
-  );
-  const Field = ({ label, children }) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <LBL>{label}</LBL>
-      {children}
-    </div>
-  );
 
   const date = fill.boughtTimestamp ? fill.boughtTimestamp.slice(0, 10) : "—";
   const symbol = fill.symbol || "—";
@@ -461,7 +464,9 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, onImport
     onImport(withAccount);
   }
 
-  const canConfirm = parsed.length > 0 && (accounts.length === 0 || acctId);
+  const canUpload = accounts.length > 0 && !!acctId;
+  const canConfirm = parsed.length > 0 && !!acctId;
+  const selectedAccount = accounts.find(a => a.id === acctId);
 
   return (
     <Modal title="Import Tradovate CSV" onClose={onClose} width={780}
@@ -480,20 +485,33 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, onImport
           2. Set your date range, then click Export → CSV<br/>
           3. Upload the file below
         </div>
+        {accounts.length === 0 ? (
+          <div style={{marginBottom:14,padding:12,background:T.redBg,borderRadius:8,fontSize:13,color:T.red,lineHeight:1.6}}>
+            <strong>No accounts found.</strong> Create an account first before importing trades.
+          </div>
+        ) : (
+          <div style={{marginBottom:14,display:"flex",alignItems:"center",gap:10}}>
+            <label style={{fontSize:13,fontWeight:500,color:T.text,whiteSpace:"nowrap"}}>Assign to account</label>
+            <Select value={acctId} onChange={e=>setAcctId(e.target.value)} style={{flex:1}}>
+              <option value="">— Select account —</option>
+              {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+            </Select>
+          </div>
+        )}
         {parseErr && (
           <div style={{color:T.red,fontSize:12,marginBottom:12,padding:"8px 12px",background:T.redBg,borderRadius:6}}>
             {parseErr}
           </div>
         )}
         <div
-          style={{border:`2px dashed ${drag?T.green:T.border2}`,borderRadius:10,padding:"50px 40px",textAlign:"center",cursor:"pointer",background:drag?T.greenBg:"transparent",transition:"all 0.15s"}}
-          onDragOver={e=>{e.preventDefault();setDrag(true);}}
+          style={{border:`2px dashed ${drag?T.green:(canUpload?T.border2:T.border)}`,borderRadius:10,padding:"50px 40px",textAlign:"center",cursor:canUpload?"pointer":"not-allowed",background:drag?T.greenBg:"transparent",transition:"all 0.15s",opacity:canUpload?1:0.45}}
+          onDragOver={e=>{if(!canUpload)return;e.preventDefault();setDrag(true);}}
           onDragLeave={()=>setDrag(false)}
-          onDrop={e=>{e.preventDefault();setDrag(false);const f=e.dataTransfer.files[0];if(f)handleFile(f);}}
-          onClick={()=>fileRef.current.click()}>
+          onDrop={e=>{e.preventDefault();setDrag(false);if(!canUpload)return;const f=e.dataTransfer.files[0];if(f)handleFile(f);}}
+          onClick={()=>{if(canUpload)fileRef.current.click();}}>
           <div style={{fontSize:32,marginBottom:10}}>📂</div>
           <div style={{fontSize:14,fontWeight:500,marginBottom:4}}>Drop CSV file here or click to browse</div>
-          <div style={{fontSize:12,color:T.hint}}>Export from Tradovate as .csv</div>
+          <div style={{fontSize:12,color:T.hint}}>{canUpload?"Export from Tradovate as .csv":"Select an account above to continue"}</div>
           <input ref={fileRef} type="file" accept=".csv" style={{display:"none"}} onChange={e=>{const f=e.target.files[0];if(f)handleFile(f);}}/>
         </div>
       </>}
@@ -507,11 +525,10 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, onImport
               <strong>{skipped}</strong> skipped (already imported)
             </span>
           )}
-          {accounts.length > 0 && (
-            <Select value={acctId} onChange={e=>setAcctId(e.target.value)} style={{marginLeft:"auto"}}>
-              <option value="">— Select account —</option>
-              {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-            </Select>
+          {selectedAccount && (
+            <span style={{marginLeft:"auto",fontSize:12,padding:"3px 10px",background:T.surface,borderRadius:6,color:T.muted}}>
+              Account: <strong style={{color:T.text}}>{selectedAccount.name}</strong>
+            </span>
           )}
           <button style={btn("ghost")} onClick={()=>setStep("upload")}>← Back</button>
         </div>
@@ -558,7 +575,7 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, onImport
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-function Dashboard({trades, accounts}) {
+function Dashboard({trades, accounts, strategies=[]}) {
   const wins=trades.filter(t=>t.fill?.outcome==="win");
   const losses=trades.filter(t=>t.fill?.outcome==="loss");
   const bes=trades.filter(t=>t.fill?.outcome==="be");
@@ -581,7 +598,7 @@ function Dashboard({trades, accounts}) {
   const eqData=sorted.map((t,i)=>{cum+=(t.fill?.netPnlDollars||0);return{n:i+1,pnl:parseFloat(cum.toFixed(2))};});
 
   // strat breakdown — net dollars per strategy
-  const stratData=["ORB","ILM","Model","NONE"].map(s=>{
+  const stratData=strategies.map(s=>{
     const g=trades.filter(t=>t.journal?.strategy===s);
     const netD=parseFloat(g.reduce((sum,t)=>sum+(t.fill?.netPnlDollars||0),0).toFixed(2));
     return {s, count:g.length, netD};
@@ -765,8 +782,6 @@ function TradeLog({trades, accounts, onEdit, onDelete}) {
     return [...s].sort();
   },[trades]);
 
-  const TH=({children,style={}})=><th style={{textAlign:"left",padding:"7px 10px",borderBottom:`0.5px solid ${T.border}`,color:T.hint,fontWeight:500,fontSize:10,textTransform:"uppercase",letterSpacing:"0.6px",whiteSpace:"nowrap",...style}}>{children}</th>;
-  const TD=({children,style={}})=><td style={{padding:"7px 10px",borderBottom:`0.5px solid ${T.border}`,fontSize:12,...style}}>{children}</td>;
 
   function outcomeColor(oc){return oc==="win"?T.green:oc==="loss"?T.red:T.yellow;}
 
@@ -839,7 +854,7 @@ function TradeLog({trades, accounts, onEdit, onDelete}) {
 }
 
 // ── Analytics ─────────────────────────────────────────────────────────────────
-function Analytics({trades}) {
+function Analytics({trades, strategies=[]}) {
   const [dim,setDim]=useState("strategy");
   const total=trades.length;
 
@@ -900,7 +915,7 @@ function Analytics({trades}) {
   const symbols=[...new Set(trades.map(t=>t.fill?.symbol).filter(Boolean))].sort();
 
   const chartData={
-    strategy:grpByField(t=>t.journal?.strategy,["ORB","ILM","Model","NONE"]),
+    strategy:grpByField(t=>t.journal?.strategy,strategies),
     direction:grpByField(t=>t.fill?.direction,["Long","Short"]),
     symbol:grpByField(t=>t.fill?.symbol,symbols),
     dow:dowData,
@@ -1490,9 +1505,9 @@ export default function App() {
 
       {/* Content */}
       <div style={{padding:"20px",maxWidth:1100,margin:"0 auto"}}>
-        {page==="dashboard"&&<Dashboard trades={data.trades} accounts={data.accounts}/>}
+        {page==="dashboard"&&<Dashboard trades={data.trades} accounts={data.accounts} strategies={data.settings?.strategies||[]}/>}
         {page==="trades"&&<TradeLog trades={data.trades} accounts={data.accounts} onEdit={setDetailTrade} onDelete={deleteTrade}/>}
-        {page==="analytics"&&<Analytics trades={data.trades}/>}
+        {page==="analytics"&&<Analytics trades={data.trades} strategies={data.settings?.strategies||[]}/>}
         {page==="accounts"&&<AccountsPage accounts={data.accounts} trades={data.trades} onAdd={()=>{setEditItem(null);setModal("account");}} onEdit={a=>{setEditItem(a);setModal("account");}} onDelete={deleteAccount}/>}
         {page==="settings"&&<SettingsPage data={data} onDataChange={setData}/>}
       </div>
