@@ -439,7 +439,7 @@ function AccountForm({acct, onSave, onClose}) {
 }
 
 // ── Tradovate Import Modal ────────────────────────────────────────────────────
-function TradovateImportModal({ accounts, settings, existingBuyFillIds, onImport, onClose }) {
+function TradovateImportModal({ accounts, settings, existingBuyFillIds, existingJournalMap, onImport, onClose }) {
   const [step, setStep] = useState("upload");
   const [parsed, setParsed] = useState([]);
   const [skipped, setSkipped] = useState(0);
@@ -457,7 +457,8 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, onImport
         existingBuyFillIds || [],
         settings.commissions,
         settings.beThresholdUsd ?? 50,
-        settings.sourceTimezone ?? "Europe/Berlin"
+        settings.sourceTimezone ?? "Europe/Berlin",
+        existingJournalMap
       );
       if (result.errors.length > 0 && result.trades.length === 0) {
         setParseErr(result.errors[0]);
@@ -501,11 +502,19 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, onImport
     <Modal title="Import Tradovate CSV" onClose={onClose} width={780}
       footer={<>
         <button style={btn("ghost")} onClick={onClose}>Cancel</button>
-        {step === "preview" && (
-          <button style={btn()} disabled={!canConfirm} onClick={handleConfirm}>
-            Import {parsed.length} trade{parsed.length !== 1 ? "s" : ""}
-          </button>
-        )}
+        {step === "preview" && (() => {
+          const updatedCount = parsed.filter(t => t.fill?._updated).length;
+          const newCount = parsed.length - updatedCount;
+          const label = [
+            newCount > 0 && `${newCount} new`,
+            updatedCount > 0 && `${updatedCount} updated`,
+          ].filter(Boolean).join(" + ") || "0";
+          return (
+            <button style={btn()} disabled={!canConfirm} onClick={handleConfirm}>
+              Import {label}
+            </button>
+          );
+        })()}
       </>}>
       {step === "upload" && <>
         <div style={{marginBottom:14,padding:12,background:T.surface,borderRadius:8,fontSize:12,lineHeight:1.7,color:T.muted}}>
@@ -545,22 +554,35 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, onImport
         </div>
       </>}
       {step === "preview" && <>
-        <div style={{display:"flex",gap:12,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
-          <span style={{fontSize:12,color:T.muted}}>
-            Found <strong style={{color:T.text}}>{parsed.length}</strong> trade{parsed.length!==1?"s":""}
-          </span>
-          {skipped > 0 && (
-            <span style={{fontSize:12,color:T.yellow}}>
-              <strong>{skipped}</strong> skipped (already imported)
-            </span>
-          )}
-          {selectedAccount && (
-            <span style={{marginLeft:"auto",fontSize:12,padding:"3px 10px",background:T.surface,borderRadius:6,color:T.muted}}>
-              Account: <strong style={{color:T.text}}>{selectedAccount.name}</strong>
-            </span>
-          )}
-          <button style={btn("ghost")} onClick={()=>setStep("upload")}>← Back</button>
-        </div>
+        {(() => {
+          const updatedCount = parsed.filter(t => t.fill?._updated).length;
+          const newCount = parsed.length - updatedCount;
+          return (
+            <div style={{display:"flex",gap:12,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
+              {newCount > 0 && (
+                <span style={{fontSize:12,color:T.muted}}>
+                  <strong style={{color:T.text}}>{newCount}</strong> new trade{newCount!==1?"s":""}
+                </span>
+              )}
+              {updatedCount > 0 && (
+                <span style={{fontSize:12,color:T.blue??T.text}}>
+                  <strong>{updatedCount}</strong> updated (journal preserved)
+                </span>
+              )}
+              {skipped > 0 && (
+                <span style={{fontSize:12,color:T.yellow}}>
+                  <strong>{skipped}</strong> skipped
+                </span>
+              )}
+              {selectedAccount && (
+                <span style={{marginLeft:"auto",fontSize:12,padding:"3px 10px",background:T.surface,borderRadius:6,color:T.muted}}>
+                  Account: <strong style={{color:T.text}}>{selectedAccount.name}</strong>
+                </span>
+              )}
+              <button style={btn("ghost")} onClick={()=>setStep("upload")}>← Back</button>
+            </div>
+          );
+        })()}
         {errors.length > 0 && (
           <div style={{color:T.red,fontSize:11,marginBottom:10,padding:"8px 12px",background:T.redBg,borderRadius:6,lineHeight:1.7}}>
             {errors.map((e,i)=><div key={i}>{e}</div>)}
@@ -1575,7 +1597,14 @@ export default function App() {
     setData({...data,accounts:data.accounts.filter(a=>a.id!==id)});
   }
   function importTrades(ts) {
-    setData({...data,trades:[...data.trades,...ts]});
+    const updatedIds = new Set(ts.filter(t => t.fill?._updated).map(t => t.fill.buyFillId));
+    const base = data.trades.filter(t => !updatedIds.has(t.fill?.buyFillId));
+    const clean = ts.map(t => {
+      if (!t.fill?._updated) return t;
+      const { _updated, ...fill } = t.fill;
+      return { ...t, fill };
+    });
+    setData({ ...data, trades: [...base, ...clean] });
     setModal(null);
   }
 
@@ -1623,7 +1652,7 @@ export default function App() {
       </div>
 
       {modal==="account"&&<AccountForm acct={editItem} onSave={saveAccount} onClose={()=>setModal(null)}/>}
-      {modal==="import"&&<TradovateImportModal accounts={data.accounts} settings={data.settings} existingBuyFillIds={data.trades.map(t=>t.fill?.buyFillId).filter(Boolean)} onImport={importTrades} onClose={()=>setModal(null)}/>}
+      {modal==="import"&&<TradovateImportModal accounts={data.accounts} settings={data.settings} existingBuyFillIds={data.trades.map(t=>t.fill?.buyFillId).filter(Boolean)} existingJournalMap={new Map(data.trades.map(t=>[t.fill?.buyFillId,t.journal]).filter(([id])=>id))} onImport={importTrades} onClose={()=>setModal(null)}/>}
       {detailTrade&&(
         <TradeDetailPanel
           trade={detailTrade}

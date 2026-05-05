@@ -122,7 +122,7 @@ function parseCSVLine(line) {
  * @param {string} [sourceTimezone] - IANA timezone of the CSV timestamps (e.g. "Europe/Berlin")
  * @returns {{ trades: import('../types').Trade[], skipped: number, errors: string[] }}
  */
-export function parseTradovateCSV(text, existingBuyFillIds, commissions, beThresholdUsd, sourceTimezone) {
+export function parseTradovateCSV(text, existingBuyFillIds, commissions, beThresholdUsd, sourceTimezone, existingJournalMap) {
   const errors = [];
   const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 
@@ -182,10 +182,12 @@ export function parseTradovateCSV(text, existingBuyFillIds, commissions, beThres
   const trades = [];
 
   for (const [buyFillId, rows] of groups) {
-    // Dedup
+    // Dedup — skip if already imported, unless we have a journal to preserve (re-import case)
     if (existingSet.has(buyFillId)) {
-      skipped++;
-      continue;
+      if (!existingJournalMap?.has(buyFillId)) {
+        skipped++;
+        continue;
+      }
     }
 
     try {
@@ -239,6 +241,7 @@ export function parseTradovateCSV(text, existingBuyFillIds, commissions, beThres
       const beUsd = beThresholdUsd ?? 50;
       const outcome = Math.abs(netPnlDollars) <= beUsd ? "be" : netPnlDollars > 0 ? "win" : "loss";
 
+      const preservedJournal = existingJournalMap?.get(buyFillId);
       trades.push({
         fill: {
           buyFillId,
@@ -259,8 +262,9 @@ export function parseTradovateCSV(text, existingBuyFillIds, commissions, beThres
           soldTimestamp,
           durationSec,
           source: "tradovate",
+          _updated: !!preservedJournal,
         },
-        journal: {
+        journal: preservedJournal ?? {
           accountId: "",
           riskTicks: null,
           rCollected: null,
