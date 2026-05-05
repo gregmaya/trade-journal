@@ -728,14 +728,22 @@ function Dashboard({trades, accounts, strategies=[], settings={}}) {
           <div style={{padding:"14px"}}>
             {stratData.length>0
               ? <ResponsiveContainer width="100%" height={160}>
-                  <BarChart data={stratData} layout="vertical" margin={{top:0,right:50,left:0,bottom:0}}>
+                  <BarChart data={stratData} layout="vertical" margin={{top:0,right:52,left:52,bottom:0}}>
                     <XAxis type="number" hide/>
                     <YAxis dataKey="s" type="category" tickLine={false} axisLine={false} tick={{fontSize:11,fill:T.muted}} width={36}/>
                     <Tooltip formatter={v=>[fmtDollars(v),"Net P&L"]} contentStyle={{background:T.card,border:`0.5px solid ${T.border2}`,borderRadius:6,fontSize:11}}/>
                     <ReferenceLine x={0} stroke={T.border2}/>
-                    <Bar dataKey="netD" radius={3} fill={T.green}
-                      label={{position:"right",fontSize:10,fill:T.muted,formatter:v=>fmtDollars(v)}}
-                      shape={p=><rect {...p} fill={p.value>=0?T.green:T.red} fillOpacity={0.8}/>}/>
+                    <Bar dataKey="netD" fill={T.green}
+                      label={({x,y,width,height,value})=>{
+                        const neg=value<0;
+                        const lx=neg?x+width-4:x+width+4;
+                        return <text x={lx} y={y+height/2+4} textAnchor={neg?"end":"start"} fontSize={10} fill={T.muted}>{fmtDollars(value)}</text>;
+                      }}
+                      shape={({x,y,width,height,value})=>{
+                        const fill=value>=0?T.green:T.red;
+                        const bx=width<0?x+width:x;
+                        return <rect x={bx} y={y} width={Math.abs(width)} height={height} fill={fill} fillOpacity={0.8} rx={3} ry={3}/>;
+                      }}/>
                   </BarChart>
                 </ResponsiveContainer>
               : <div style={{height:160,display:"flex",alignItems:"center",justifyContent:"center",color:T.hint,fontSize:12}}>No trades yet</div>
