@@ -690,6 +690,11 @@ function Dashboard({trades, accounts, strategies=[], settings={}}) {
   );
 
   const avgProfitableTicks=wins.length>0?wins.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0)/wins.length:null;
+  const sortedAccounts=[...accounts].sort((a,b)=>{
+    const lastA=trades.filter(t=>t.journal?.accountId===a.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
+    const lastB=trades.filter(t=>t.journal?.accountId===b.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
+    return lastB>lastA?1:-1;
+  });
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
@@ -728,16 +733,17 @@ function Dashboard({trades, accounts, strategies=[], settings={}}) {
           <div style={{padding:"14px"}}>
             {stratData.length>0
               ? <ResponsiveContainer width="100%" height={160}>
-                  <BarChart data={stratData} layout="vertical" margin={{top:0,right:52,left:52,bottom:0}}>
+                  <BarChart data={stratData} layout="vertical" margin={{top:0,right:8,left:8,bottom:0}}>
                     <XAxis type="number" hide/>
-                    <YAxis dataKey="s" type="category" tickLine={false} axisLine={false} tick={{fontSize:11,fill:T.muted}} width={36}/>
+                    <YAxis dataKey="s" type="category" tickLine={false} axisLine={false} tick={{fontSize:11,fill:T.muted}} width={60}/>
                     <Tooltip formatter={v=>[fmtDollars(v),"Net P&L"]} contentStyle={{background:T.card,border:`0.5px solid ${T.border2}`,borderRadius:6,fontSize:11}}/>
                     <ReferenceLine x={0} stroke={T.border2}/>
                     <Bar dataKey="netD" fill={T.green}
                       label={({x,y,width,height,value})=>{
+                        if(Math.abs(width)<38) return null;
                         const neg=value<0;
-                        const lx=neg?x+width-4:x+width+4;
-                        return <text x={lx} y={y+height/2+4} textAnchor={neg?"end":"start"} fontSize={10} fill={T.muted}>{fmtDollars(value)}</text>;
+                        const lx=neg?x+width+4:x+width-4;
+                        return <text x={lx} y={y+height/2+4} textAnchor={neg?"start":"end"} fontSize={10} fill="#fff" fillOpacity={0.85}>{fmtDollars(value)}</text>;
                       }}
                       shape={({x,y,width,height,value})=>{
                         const fill=value>=0?T.green:T.red;
@@ -784,7 +790,7 @@ function Dashboard({trades, accounts, strategies=[], settings={}}) {
           <CardHead title="Accounts"/>
           <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",gap:10}}>
             {accounts.length===0&&<div style={{fontSize:12,color:T.hint,textAlign:"center",padding:"12px 0"}}>No accounts yet</div>}
-            {accounts.map(a=>{
+            {sortedAccounts.map(a=>{
               const acctTrades=trades.filter(t=>t.journal?.accountId===a.id);
               const netPnl=acctTrades.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
               const currentBalance=a.startingBalance+netPnl;
@@ -1101,6 +1107,12 @@ function AccountCard({a, trades, settings={}, onEdit, onDelete}) {
   const showChart = a.type === "eval" || a.type === "pa";
   const series = showChart ? computeDrawdownSeries(a, accountTrades) : [];
   const lastEntry = series.length > 0 ? series[series.length - 1] : null;
+  let _peakBal = series.length > 0 ? series[0].eodBalance : 0;
+  const seriesWithDD = series.map(pt => {
+    if (pt.eodBalance > _peakBal) _peakBal = pt.eodBalance;
+    return { ...pt, trailingDD: parseFloat((_peakBal - pt.eodBalance).toFixed(2)) };
+  });
+  const profitTargetLine = a.startingBalance + (a.profitTarget || 0);
 
   // Buffer metric
   let bufferPct = null;
@@ -1129,12 +1141,14 @@ function AccountCard({a, trades, settings={}, onEdit, onDelete}) {
     if (!active || !payload || !payload.length) return null;
     const eod = payload.find(p => p.dataKey === "eodBalance");
     const fl = payload.find(p => p.dataKey === "floor");
+    const dd = payload.find(p => p.dataKey === "trailingDD");
     const buf = eod && fl ? eod.value - fl.value : null;
     return (
       <div style={{background:T.card,border:`0.5px solid ${T.border2}`,borderRadius:6,padding:"8px 10px",fontSize:11}}>
         <div style={{color:T.hint,marginBottom:4}}>{fmtDate(label)}</div>
         {eod&&<div style={{color:T.green}}>Balance: {fmtDollars(eod.value)}</div>}
         {fl&&<div style={{color:T.red}}>Floor: {fmtDollars(fl.value)}</div>}
+        {dd!=null&&<div style={{color:T.yellow}}>Trailing DD: {fmtDollars(dd.value)}</div>}
         {buf!=null&&<div style={{color:T.muted}}>Buffer: {fmtDollars(buf)}</div>}
       </div>
     );
@@ -1179,36 +1193,37 @@ function AccountCard({a, trades, settings={}, onEdit, onDelete}) {
         {/* Drawdown chart */}
         {showChart && (
           <>
-            {series.length > 0 ? (
-              <div style={{height:140,marginBottom:6}}>
+            {seriesWithDD.length > 0 ? (
+              <div style={{height:160,marginBottom:6}}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={series} margin={{top:4,right:4,left:0,bottom:0}}>
-                    <defs>
-                      <linearGradient id={`balGrad-${a.id}`} x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={T.green} stopOpacity={0.15}/>
-                        <stop offset="95%" stopColor={T.green} stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
+                  <LineChart data={seriesWithDD} margin={{top:4,right:44,left:0,bottom:0}}>
                     <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
                     <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{fontSize:9,fill:T.hint}} tickFormatter={fmtDate} interval="preserveStartEnd"/>
-                    <YAxis
+                    <YAxis yAxisId="bal"
                       domain={[a.startingBalance-(a.drawdownBuffer||2000)-200, a.startingBalance+(a.profitTarget||3000)+200]}
                       tickLine={false} axisLine={false}
                       tick={{fontSize:9,fill:T.hint}}
                       tickFormatter={v=>"$"+(v/1000).toFixed(1)+"k"}
                       width={42}
                     />
+                    <YAxis yAxisId="dd" orientation="right" tickLine={false} axisLine={false}
+                      tick={{fontSize:9,fill:T.yellow}}
+                      tickFormatter={v=>"$"+(v/1000).toFixed(1)+"k"}
+                      width={38}
+                    />
                     <Tooltip content={<ChartTooltip/>}/>
+                    {a.profitTarget>0&&<ReferenceLine yAxisId="bal" y={profitTargetLine} stroke={T.green} strokeDasharray="4 2" strokeWidth={1}/>}
                     {a.lockLevel != null && (
-                      <ReferenceLine y={a.lockLevel} stroke={T.indigo} strokeDasharray="3 3" strokeWidth={1}/>
+                      <ReferenceLine yAxisId="bal" y={a.lockLevel} stroke={T.indigo} strokeDasharray="3 3" strokeWidth={1}/>
                     )}
-                    <Line type="monotone" dataKey="eodBalance" stroke={T.green} strokeWidth={2} dot={false} name="Balance"/>
-                    <Line type="monotone" dataKey="floor" stroke={T.red} strokeWidth={1.5} strokeDasharray="4 3" dot={false} name="Floor"/>
+                    <Line yAxisId="bal" type="monotone" dataKey="eodBalance" stroke={T.green} strokeWidth={2} dot={false} name="Balance"/>
+                    <Line yAxisId="bal" type="monotone" dataKey="floor" stroke={T.red} strokeWidth={1.5} strokeDasharray="4 3" dot={false} name="Floor"/>
+                    <Line yAxisId="dd" type="monotone" dataKey="trailingDD" stroke={T.yellow} strokeWidth={1.5} strokeDasharray="3 2" dot={false} name="Trailing DD"/>
                   </LineChart>
                 </ResponsiveContainer>
               </div>
             ) : (
-              <div style={{height:140,display:"flex",alignItems:"center",justifyContent:"center",color:T.hint,fontSize:12,marginBottom:6,background:T.surface,borderRadius:8}}>
+              <div style={{height:160,display:"flex",alignItems:"center",justifyContent:"center",color:T.hint,fontSize:12,marginBottom:6,background:T.surface,borderRadius:8}}>
                 No trades yet
               </div>
             )}
@@ -1234,6 +1249,11 @@ function AccountCard({a, trades, settings={}, onEdit, onDelete}) {
 }
 
 function AccountsPage({accounts, trades, settings={}, onAdd, onEdit, onDelete}) {
+  const sortedAccounts=[...accounts].sort((a,b)=>{
+    const lastA=trades.filter(t=>t.journal?.accountId===a.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
+    const lastB=trades.filter(t=>t.journal?.accountId===b.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
+    return lastB>lastA?1:-1;
+  });
   return (
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
@@ -1241,7 +1261,7 @@ function AccountsPage({accounts, trades, settings={}, onAdd, onEdit, onDelete}) 
         <button style={btn()} onClick={onAdd}>+ Add account</button>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(360px,1fr))",gap:16}}>
-        {accounts.map(a=>(
+        {sortedAccounts.map(a=>(
           <AccountCard key={a.id} a={a} trades={trades} settings={settings} onEdit={onEdit} onDelete={onDelete}/>
         ))}
         {accounts.length===0&&(
@@ -1533,6 +1553,7 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [detailTrade, setDetailTrade] = useState(null);
+  const [selectedAccIds, setSelectedAccIds] = useState([]);
   const openingRef = useRef(false);
 
   useEffect(() => {
@@ -1620,6 +1641,13 @@ export default function App() {
   }
 
   const PAGES=[["dashboard","Dashboard"],["trades","Trades"],["analytics","Analytics"],["accounts","Accounts"],["settings","Settings"]];
+  const filteredTrades=selectedAccIds.length===0?data.trades:data.trades.filter(t=>selectedAccIds.includes(t.journal?.accountId));
+  function toggleAccId(id) {
+    setSelectedAccIds(prev=>{
+      if(prev.includes(id)) return prev.length===1?[]:prev.filter(x=>x!==id);
+      return [...prev,id];
+    });
+  }
 
   return (
     <div style={{minHeight:"100vh",background:T.bg,fontFamily:"var(--font-sans)"}}>
@@ -1653,11 +1681,28 @@ export default function App() {
         </div>
       </div>
 
+      {/* Account filter bar — shown on Dashboard and Analytics */}
+      {(page==="dashboard"||page==="analytics")&&data.accounts.length>0&&(
+        <div style={{background:T.card,borderBottom:`0.5px solid ${T.border}`,padding:"6px 20px",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:11,color:T.hint,marginRight:2}}>Account:</span>
+          <button
+            onClick={()=>setSelectedAccIds([])}
+            style={{...btn(selectedAccIds.length===0?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
+          >All</button>
+          {data.accounts.map(a=>(
+            <button key={a.id}
+              onClick={()=>toggleAccId(a.id)}
+              style={{...btn(selectedAccIds.includes(a.id)?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
+            >{a.name}</button>
+          ))}
+        </div>
+      )}
+
       {/* Content */}
       <div style={{padding:"20px",maxWidth:1100,margin:"0 auto"}}>
-        {page==="dashboard"&&<Dashboard trades={data.trades} accounts={data.accounts} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
+        {page==="dashboard"&&<Dashboard trades={filteredTrades} accounts={data.accounts} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
         {page==="trades"&&<TradeLog trades={data.trades} accounts={data.accounts} settings={data.settings||{}} onEdit={setDetailTrade} onDelete={deleteTrade}/>}
-        {page==="analytics"&&<Analytics trades={data.trades} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
+        {page==="analytics"&&<Analytics trades={filteredTrades} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
         {page==="accounts"&&<AccountsPage accounts={data.accounts} trades={data.trades} settings={data.settings||{}} onAdd={()=>{setEditItem(null);setModal("account");}} onEdit={a=>{setEditItem(a);setModal("account");}} onDelete={deleteAccount}/>}
         {page==="settings"&&<SettingsPage data={data} onDataChange={setData}/>}
       </div>

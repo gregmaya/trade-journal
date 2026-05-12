@@ -41,7 +41,7 @@ ___
 - Include the option to set "My personal rules". These are ideal habits which we should be able to test against to see if/when I'm sticking to my rules. Example of rules are :
     - Max 2 trades per session (London 3-5am UTC-4/ NY 9:30-11:30 UTC-4) considering entries only.
     - Max loss per day 400 USD + 10%
-    - Max R = 400usd
+
 
 
 ## Future — Cloud Storage Migration
