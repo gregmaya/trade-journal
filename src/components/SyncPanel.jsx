@@ -76,7 +76,7 @@ export function SyncPanel({ onMerge, T }) {
               border: `1px solid ${T.border}`, borderRadius: 4, fontSize: 12 }} />
           <button onClick={() => syncOne(acc)}
             disabled={!ready || !passwords[acc.id] || syncing !== null}
-            style={{ padding: '5px 12px', background: T.accent, color: '#fff',
+            style={{ padding: '5px 12px', background: T.indigo, color: '#fff',
               border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 12,
               opacity: syncing !== null ? 0.6 : 1 }}>
             {syncing === acc.id ? 'Syncing…' : 'Sync'}
