@@ -16,6 +16,7 @@ export const DEFAULT_RULES = [
  * Tags each trade with any rule violations.
  * Returns a new array — does not mutate input.
  * Trades are processed in chronological order (sorted by openTime).
+ * Expects MT5-schema trades with openTime, sessionLabel, and pnl fields.
  *
  * @param {import('./tradeSchema.js').Trade[]} trades
  * @param {Array<{id: string, type: string, value: number}>} rules

@@ -648,7 +648,8 @@ function Dashboard({trades, accounts, strategies=[], settings={}}) {
   );
 
   const avgProfitableTicks=wins.length>0?wins.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0)/wins.length:null;
-  const { adherenceRate } = computeAdherence(trades);
+  const ruledTrades = trades.filter(t => t.openTime !== undefined);
+  const { adherenceRate } = computeAdherence(ruledTrades);
   const sortedAccounts=[...accounts].sort((a,b)=>{
     const lastA=trades.filter(t=>t.journal?.accountId===a.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
     const lastB=trades.filter(t=>t.journal?.accountId===b.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
@@ -665,7 +666,7 @@ function Dashboard({trades, accounts, strategies=[], settings={}}) {
         <Metric label="BE %" value={stats.bePct!=null?stats.bePct.toFixed(0)+"%":"—"} color={T.yellow} sub={`${stats.bes} BE`} info={`Trades within ±$${settings.beThresholdUsd??50} net P&L — classified as break-even.`}/>
         <Metric label="Profit factor" value={pf!=null?pf.toFixed(2):"—"} color={pf==null?T.hint:pf>=1.5?T.green:pf>=1?T.yellow:T.red} info="Gross profit of winning trades ÷ gross loss of losing trades. Above 1.5 is strong."/>
         <Metric label="Trades today" value={todayCount} color={T.text}/>
-        <Metric label="Rule adherence" value={`${Math.round(adherenceRate * 100)}%`} color={adherenceRate >= 0.8 ? T.green : adherenceRate >= 0.6 ? T.yellow : T.red}/>
+        <Metric label="Rule adherence" value={ruledTrades.length > 0 ? `${Math.round(adherenceRate * 100)}%` : '—'} color={ruledTrades.length > 0 ? (adherenceRate >= 0.8 ? T.green : adherenceRate >= 0.6 ? T.yellow : T.red) : T.hint}/>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
