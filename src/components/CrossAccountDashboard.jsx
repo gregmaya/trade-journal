@@ -2,6 +2,17 @@ import { useState } from 'react'
 import { computeStats, computeDailyPnl } from '../utils/analytics.js'
 import { MonthlyCalendar } from './MonthlyCalendar.jsx'
 
+// Small local Metric chip — do NOT import KpiCard (it doesn't exist in this codebase)
+function Metric({ label, value, color, T }) {
+  const resolvedColor = color ?? T.text
+  return (
+    <div style={{ background: T.surface, borderRadius: 8, padding: '12px 14px' }}>
+      <div style={{ fontSize: 11, color: T.hint, marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 500, color: resolvedColor }}>{value}</div>
+    </div>
+  )
+}
+
 export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
   // Only use MT5-format trades (openTime field distinguishes them from Tradovate)
   const mt5Trades = allTrades.filter(t => t.openTime !== undefined)
@@ -14,26 +25,16 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
   const [calYear, setCalYear] = useState(now.getFullYear())
   const [calMonth, setCalMonth] = useState(now.getMonth() + 1)
 
-  // Small local Metric chip — do NOT import KpiCard (it doesn't exist in this codebase)
-  function Metric({ label, value, color = T.text }) {
-    return (
-      <div style={{ background: T.surface, borderRadius: 8, padding: '12px 14px' }}>
-        <div style={{ fontSize: 11, color: T.hint, marginBottom: 4 }}>{label}</div>
-        <div style={{ fontSize: 22, fontWeight: 500, color }}>{value}</div>
-      </div>
-    )
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Aggregate summary */}
       <div>
         <div style={{ fontSize: 13, fontWeight: 500, color: T.hint, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 12 }}>All Accounts</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
-          <Metric label="Net P&L" value={fmtDollars(totalPnl)} color={totalPnl >= 0 ? T.green : T.red} />
-          <Metric label="Total Trades" value={stats.total} />
-          <Metric label="Win Rate" value={stats.total > 0 ? `${Math.round(stats.winRate * 100)}%` : '—'} color={stats.winRate >= 0.5 ? T.green : T.red} />
-          <Metric label="Profit Factor" value={stats.profitFactor != null ? stats.profitFactor.toFixed(2) : '—'} color={stats.profitFactor != null ? (stats.profitFactor >= 1.5 ? T.green : stats.profitFactor >= 1 ? T.yellow : T.red) : T.hint} />
+          <Metric label="Net P&L" value={fmtDollars(totalPnl)} color={totalPnl >= 0 ? T.green : T.red} T={T} />
+          <Metric label="Total Trades" value={stats.total} T={T} />
+          <Metric label="Win Rate" value={stats.total > 0 ? `${Math.round(stats.winRate * 100)}%` : '—'} color={stats.winRate >= 0.5 ? T.green : T.red} T={T} />
+          <Metric label="Profit Factor" value={stats.profitFactor != null ? stats.profitFactor.toFixed(2) : '—'} color={stats.profitFactor != null ? (stats.profitFactor >= 1.5 ? T.green : stats.profitFactor >= 1 ? T.yellow : T.red) : T.hint} T={T} />
         </div>
       </div>
 
@@ -74,7 +75,7 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
                       {fmtDollars(pnl)}
                     </span>
                     <span style={{ fontSize: 11, fontWeight: 600, color: statusColors[status], background: statusColors[status] + '18', padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      {status.replace('_', ' ')}
+                      {status.replaceAll('_', ' ')}
                     </span>
                   </div>
                 </div>
