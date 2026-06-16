@@ -1,10 +1,13 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from "recharts";
-import { fsaSupported, hasHandle, openFile, createFile, readData, writeData, readLocalStorage, defaultData } from "./storage.js";
+import { fsaSupported, hasHandle, openFile, createFile, readData, writeData, readLocalStorage, defaultData, mergeTrades } from "./storage.js";
 import { parseTradovateCSV, convertToNY } from "./utils/tradovate.js";
 import { fmtDollars, fmtTicks, fmtR as fmtRUtil, computeR, computeWinStats, computeDrawdownSeries } from "./utils/compute.js";
 import { AccountCard } from "./components/AccountCard.jsx";
 import { TradeLog } from "./components/TradeLog.jsx";
+import { SyncPanel } from "./components/SyncPanel.jsx";
+import { T, btn, Card } from "./utils/theme.jsx";
+import { getOutcome, entryTimestamp, exitTimestamp, fmtTicksInt } from "./utils/tradeHelpers.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
@@ -16,63 +19,14 @@ function fmtD(n) {
   if (n == null) return "—";
   return (n < 0 ? "-" : "") + "$" + Math.abs(Math.round(n)).toLocaleString();
 }
-function fmtTicksInt(n) {
-  if (n == null) return "—";
-  return (n >= 0 ? "+" : "") + Math.round(n) + "t";
-}
 
-// Direction-aware fill helpers
-function entryTimestamp(fill) {
-  return fill.direction === "Short" ? fill.soldTimestamp : fill.boughtTimestamp;
-}
-function exitTimestamp(fill) {
-  return fill.direction === "Short" ? fill.boughtTimestamp : fill.soldTimestamp;
-}
+// Direction-aware fill helpers (local aliases)
 function entryPrice(fill) {
   return fill.direction === "Short" ? fill.avgSellPrice : fill.buyPrice;
 }
 function avgExitPrice(fill) {
   return fill.direction === "Short" ? fill.buyPrice : fill.avgSellPrice;
 }
-
-// Compute outcome dynamically from stored dollars + current USD threshold
-function getOutcome(trade, settings) {
-  const dollars = trade.fill?.netPnlDollars ?? 0;
-  const threshold = settings?.beThresholdUsd ?? 50;
-  if (Math.abs(dollars) <= threshold) return "be";
-  return dollars > 0 ? "win" : "loss";
-}
-
-// ── Tokens ───────────────────────────────────────────────────────────────────
-const T = {
-  bg: "var(--color-background-tertiary)",
-  surface: "var(--color-background-secondary)",
-  card: "var(--color-background-primary)",
-  border: "var(--color-border-tertiary)",
-  border2: "var(--color-border-secondary)",
-  text: "var(--color-text-primary)",
-  muted: "var(--color-text-secondary)",
-  hint: "var(--color-text-tertiary)",
-  green: "#10b981", greenBg: "rgba(16,185,129,0.12)",
-  red: "#ef4444", redBg: "rgba(239,68,68,0.12)",
-  yellow: "#f59e0b", yellowBg: "rgba(245,158,11,0.1)",
-  indigo: "#6366f1", indigoBg: "rgba(99,102,241,0.12)",
-};
-
-// ── Shared UI ─────────────────────────────────────────────────────────────────
-const btn = (variant="primary") => ({
-  padding:"6px 14px", borderRadius:6, fontSize:12, fontWeight:500, cursor:"pointer", border:"0.5px solid",
-  fontFamily:"var(--font-sans)",
-  ...(variant==="primary" ? { background:T.text, color:T.card, borderColor:"transparent" }
-    : variant==="ghost" ? { background:"transparent", color:T.muted, borderColor:T.border2 }
-    : variant==="danger" ? { background:T.redBg, color:T.red, borderColor:"transparent" }
-    : {})
-});
-const Card = ({children, style={}}) => (
-  <div style={{background:T.card, border:`0.5px solid ${T.border}`, borderRadius:"var(--border-radius-lg)", ...style}}>
-    {children}
-  </div>
-);
 const CardHead = ({title, action}) => (
   <div style={{padding:"10px 14px", borderBottom:`0.5px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
     <span style={{fontSize:11, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.8px"}}>{title}</span>
@@ -1381,6 +1335,11 @@ export default function App() {
     setData({ ...data, trades: [...base, ...clean] });
     setModal(null);
   }
+  async function handleMerge(incomingTrades) {
+    const merged = mergeTrades(data.trades, incomingTrades);
+    const nextData = { ...data, trades: merged };
+    setData(nextData);
+  }
 
   const PAGES=[["dashboard","Dashboard"],["trades","Trades"],["analytics","Analytics"],["accounts","Accounts"],["settings","Settings"]];
   const filteredTrades=selectedAccIds.length===0?data.trades:data.trades.filter(t=>selectedAccIds.includes(t.journal?.accountId));
@@ -1442,7 +1401,7 @@ export default function App() {
 
       {/* Content */}
       <div style={{padding:"20px",maxWidth:1100,margin:"0 auto"}}>
-        {page==="dashboard"&&<Dashboard trades={filteredTrades} accounts={data.accounts} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
+        {page==="dashboard"&&<><SyncPanel onMerge={handleMerge} T={T}/><Dashboard trades={filteredTrades} accounts={data.accounts} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/></>}
         {page==="trades"&&<TradeLog trades={data.trades} accounts={data.accounts} settings={data.settings||{}} onEdit={setDetailTrade} onDelete={deleteTrade}/>}
         {page==="analytics"&&<Analytics trades={filteredTrades} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
         {page==="accounts"&&<AccountsPage accounts={data.accounts} trades={data.trades} settings={data.settings||{}} onAdd={()=>{setEditItem(null);setModal("account");}} onEdit={a=>{setEditItem(a);setModal("account");}} onDelete={deleteAccount}/>}

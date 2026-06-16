@@ -1,21 +1,6 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
 import { fmtDollars } from "../utils/compute.js";
-
-// ── Tokens (duplicated from App.jsx — module-level constant) ──────────────────
-const T = {
-  bg: "var(--color-background-tertiary)",
-  surface: "var(--color-background-secondary)",
-  card: "var(--color-background-primary)",
-  border: "var(--color-border-tertiary)",
-  border2: "var(--color-border-secondary)",
-  text: "var(--color-text-primary)",
-  muted: "var(--color-text-secondary)",
-  hint: "var(--color-text-tertiary)",
-  green: "#10b981", greenBg: "rgba(16,185,129,0.12)",
-  red: "#ef4444", redBg: "rgba(239,68,68,0.12)",
-  yellow: "#f59e0b", yellowBg: "rgba(245,158,11,0.1)",
-  indigo: "#6366f1", indigoBg: "rgba(99,102,241,0.12)",
-};
+import { T } from "../utils/theme.jsx";
 
 // XAxis label formatter
 function fmtDate(d) {
