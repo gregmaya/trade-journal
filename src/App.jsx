@@ -10,6 +10,8 @@ import { T, btn, Card } from "./utils/theme.jsx";
 import { getOutcome, entryTimestamp, exitTimestamp, fmtTicksInt } from "./utils/tradeHelpers.js";
 import { applyRules, computeAdherence, DEFAULT_RULES } from './utils/rules.js';
 import { RulesConfig } from './components/RulesConfig.jsx';
+import { CrossAccountDashboard } from './components/CrossAccountDashboard.jsx';
+import { ACCOUNTS } from './accounts.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
@@ -1361,7 +1363,7 @@ export default function App() {
     setData(nextData);
   }
 
-  const PAGES=[["dashboard","Dashboard"],["trades","Trades"],["analytics","Analytics"],["accounts","Accounts"],["settings","Settings"]];
+  const PAGES=[["overview","Overview"],["dashboard","Dashboard"],["trades","Trades"],["analytics","Analytics"],["accounts","Accounts"],["settings","Settings"]];
   const filteredTrades=selectedAccIds.length===0?data.trades:data.trades.filter(t=>selectedAccIds.includes(t.journal?.accountId));
   function toggleAccId(id) {
     setSelectedAccIds(prev=>{
@@ -1421,6 +1423,14 @@ export default function App() {
 
       {/* Content */}
       <div style={{padding:"20px",maxWidth:1100,margin:"0 auto"}}>
+        {page==="overview"&&(
+          <CrossAccountDashboard
+            accounts={ACCOUNTS}
+            allTrades={data.trades}
+            T={T}
+            fmtDollars={fmtDollars}
+          />
+        )}
         {page==="dashboard"&&<><SyncPanel onMerge={handleMerge} T={T}/><Dashboard trades={filteredTrades} accounts={data.accounts} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/></>}
         {page==="trades"&&(
           <div>
