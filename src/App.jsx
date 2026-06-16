@@ -958,7 +958,6 @@ function Analytics({trades, strategies=[], settings={}}) {
   const netTicks=trades.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0);
   const avgWin=wins?wTrades.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0)/wins:null;
   const avgLoss=losses?lTrades.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0)/losses:null;
-  const avgWinUsd=wins?wTrades.reduce((s,t)=>s+(t.pnl??t.fill?.netPnlDollars??0),0)/wins:0;
   const allPnls=trades.map(t=>t.fill?.netPnlDollars||0);
   const bestTrade=total?Math.max(...allPnls):null;
   const worstTrade=total?Math.min(...allPnls):null;
@@ -1026,7 +1025,7 @@ function Analytics({trades, strategies=[], settings={}}) {
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10}}>
         <Metric label="Net P&L ($)" value={fmtDollars(netDollars)} color={netDollars>=0?T.green:T.red}/>
-        <Metric label="Avg profit ($)" value={wins?fmtDollars(avgWinUsd):"—"} color={T.green}/>
+        <Metric label="Avg profit ($)" value={avgWin!=null?fmtDollars(avgWin):"—"} color={T.green}/>
         <Metric label="Win %" value={total?(wins/total*100).toFixed(0)+"%":"—"} color={total&&wins/total>=0.5?T.green:T.red}/>
         <Metric label="BE %" value={total?(bes/total*100).toFixed(0)+"%":"—"} color={T.yellow}/>
         <Metric label="Avg win ($)" value={avgWin!=null?fmtDollars(avgWin):"—"} color={T.green}/>
