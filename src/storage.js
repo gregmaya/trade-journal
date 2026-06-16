@@ -1,4 +1,5 @@
 // src/storage.js
+import { DEFAULT_RULES } from './utils/rules.js';
 let _handle = null;
 const LS_KEY = "trade_journal_v1";
 const LS_WARN_KEY = "trade_journal_fsa_warned";
@@ -82,6 +83,7 @@ export function defaultData() {
       tags: [],
       beThresholdTicks: 3,
       commissions: { micro: 1.03, mini: 3.50 },
+      rules: DEFAULT_RULES,
     },
   };
 }

@@ -8,6 +8,8 @@ import { TradeLog } from "./components/TradeLog.jsx";
 import { SyncPanel } from "./components/SyncPanel.jsx";
 import { T, btn, Card } from "./utils/theme.jsx";
 import { getOutcome, entryTimestamp, exitTimestamp, fmtTicksInt } from "./utils/tradeHelpers.js";
+import { applyRules, computeAdherence, DEFAULT_RULES } from './utils/rules.js';
+import { RulesConfig } from './components/RulesConfig.jsx';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
@@ -646,6 +648,7 @@ function Dashboard({trades, accounts, strategies=[], settings={}}) {
   );
 
   const avgProfitableTicks=wins.length>0?wins.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0)/wins.length:null;
+  const { adherenceRate } = computeAdherence(trades);
   const sortedAccounts=[...accounts].sort((a,b)=>{
     const lastA=trades.filter(t=>t.journal?.accountId===a.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
     const lastB=trades.filter(t=>t.journal?.accountId===b.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
@@ -662,6 +665,7 @@ function Dashboard({trades, accounts, strategies=[], settings={}}) {
         <Metric label="BE %" value={stats.bePct!=null?stats.bePct.toFixed(0)+"%":"—"} color={T.yellow} sub={`${stats.bes} BE`} info={`Trades within ±$${settings.beThresholdUsd??50} net P&L — classified as break-even.`}/>
         <Metric label="Profit factor" value={pf!=null?pf.toFixed(2):"—"} color={pf==null?T.hint:pf>=1.5?T.green:pf>=1?T.yellow:T.red} info="Gross profit of winning trades ÷ gross loss of losing trades. Above 1.5 is strong."/>
         <Metric label="Trades today" value={todayCount} color={T.text}/>
+        <Metric label="Rule adherence" value={`${Math.round(adherenceRate * 100)}%`} color={adherenceRate >= 0.8 ? T.green : adherenceRate >= 0.6 ? T.yellow : T.red}/>
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
@@ -1179,6 +1183,18 @@ function SettingsPage({data, onDataChange}) {
           </div>
         </div>
       </Card>
+
+      {/* Section 6: Personal rules */}
+      <Card>
+        <CardHead title="Personal rules"/>
+        <div style={{padding:"14px"}}>
+          <RulesConfig
+            rules={settings.rules ?? DEFAULT_RULES}
+            onChange={newRules => patchSettings({rules: newRules})}
+            T={T}
+          />
+        </div>
+      </Card>
     </div>
   );
 }
@@ -1250,6 +1266,7 @@ export default function App() {
   const [editItem, setEditItem] = useState(null);
   const [detailTrade, setDetailTrade] = useState(null);
   const [selectedAccIds, setSelectedAccIds] = useState([]);
+  const [ruleFilter, setRuleFilter] = useState(false);
   const openingRef = useRef(false);
 
   useEffect(() => {
@@ -1336,7 +1353,9 @@ export default function App() {
     setModal(null);
   }
   async function handleMerge(incomingTrades) {
-    const merged = mergeTrades(data.trades, incomingTrades);
+    const rules = data.settings?.rules ?? DEFAULT_RULES;
+    const tagged = applyRules(incomingTrades, rules);
+    const merged = mergeTrades(data.trades, tagged);
     const nextData = { ...data, trades: merged };
     setData(nextData);
   }
@@ -1402,7 +1421,30 @@ export default function App() {
       {/* Content */}
       <div style={{padding:"20px",maxWidth:1100,margin:"0 auto"}}>
         {page==="dashboard"&&<><SyncPanel onMerge={handleMerge} T={T}/><Dashboard trades={filteredTrades} accounts={data.accounts} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/></>}
-        {page==="trades"&&<TradeLog trades={data.trades} accounts={data.accounts} settings={data.settings||{}} onEdit={setDetailTrade} onDelete={deleteTrade}/>}
+        {page==="trades"&&(
+          <div>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+              <button
+                onClick={()=>setRuleFilter(v=>!v)}
+                style={{...btn(ruleFilter?'primary':'ghost'),padding:'4px 10px',fontSize:12}}
+              >
+                {ruleFilter ? 'Showing: rule-compliant only' : 'Show: all trades'}
+              </button>
+              {ruleFilter&&(
+                <span style={{fontSize:12,color:T.hint}}>
+                  Filtering out {data.trades.filter(t=>t.ruleViolations?.length>0).length} violation trades
+                </span>
+              )}
+            </div>
+            <TradeLog
+              trades={ruleFilter ? data.trades.filter(t=>!t.ruleViolations?.length) : data.trades}
+              accounts={data.accounts}
+              settings={data.settings||{}}
+              onEdit={setDetailTrade}
+              onDelete={deleteTrade}
+            />
+          </div>
+        )}
         {page==="analytics"&&<Analytics trades={filteredTrades} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
         {page==="accounts"&&<AccountsPage accounts={data.accounts} trades={data.trades} settings={data.settings||{}} onAdd={()=>{setEditItem(null);setModal("account");}} onEdit={a=>{setEditItem(a);setModal("account");}} onDelete={deleteAccount}/>}
         {page==="settings"&&<SettingsPage data={data} onDataChange={setData}/>}
