@@ -13,10 +13,11 @@ import { HeatmapChart }    from "./HeatmapChart.jsx";
 import { MonthlyCalendar } from "./MonthlyCalendar.jsx";
 
 // Classify NY-time hour into session label
-function sessionLabel(hourNY) {
-  if (hourNY >= 3  && hourNY < 8)  return 'london';
-  if (hourNY >= 8  && hourNY < 10) return 'overlap';
-  if (hourNY >= 9  && hourNY < 17) return 'new_york';
+function sessionLabel(hourNY, minuteNY) {
+  const t = hourNY * 60 + minuteNY;
+  if (t >= 180 && t < 300)  return 'london';   // 03:00–05:00
+  if (t >= 480 && t < 570)  return 'overlap';  // 08:00–09:30
+  if (t >= 570 && t < 690)  return 'new_york'; // 09:30–11:30
   return 'other';
 }
 
@@ -28,10 +29,11 @@ function toAnalyticsTrade(t, settings) {
     try {
       const d = new Date(openTime);
       const parts = new Intl.DateTimeFormat('en-US', {
-        hour: 'numeric', hour12: false, timeZone: 'America/New_York',
+        hour: 'numeric', minute: 'numeric', hour12: false, timeZone: 'America/New_York',
       }).formatToParts(d);
-      const h = parseInt(parts.find(p => p.type === 'hour').value);
-      sl = sessionLabel(h);
+      const hourNY   = parseInt(parts.find(p => p.type === 'hour').value);
+      const minuteNY = parseInt(parts.find(p => p.type === 'minute').value);
+      sl = sessionLabel(hourNY, minuteNY);
     } catch {}
   }
   return {
