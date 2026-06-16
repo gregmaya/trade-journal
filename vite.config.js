@@ -5,4 +5,8 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   base: '/trade-journal/',
   plugins: [react()],
+  test: {
+    environment: 'jsdom',
+    globals: true,
+  },
 })
