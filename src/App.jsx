@@ -5,7 +5,7 @@ import { parseTradovateCSV, convertToNY } from "./utils/tradovate.js";
 import { fmtDollars, fmtTicks, fmtR as fmtRUtil, computeR, computeWinStats, computeDrawdownSeries } from "./utils/compute.js";
 import { AccountCard } from "./components/AccountCard.jsx";
 import { TradeLog } from "./components/TradeLog.jsx";
-import { SyncPanel } from "./components/SyncPanel.jsx";
+import { Mt5ImportModal } from "./components/Mt5ImportModal.jsx";
 import { T, btn, Card } from "./utils/theme.jsx";
 import { getOutcome, entryTimestamp, exitTimestamp, fmtTicksInt } from "./utils/tradeHelpers.js";
 import { applyRules, computeAdherence, DEFAULT_RULES } from './utils/rules.js';
@@ -1401,6 +1401,7 @@ export default function App() {
         </div>
         <div style={{display:"flex",gap:8}}>
           <button style={btn("ghost")} onClick={()=>{setEditItem(null);setModal("import");}}>↑ Import CSV</button>
+          <button style={btn("ghost")} onClick={()=>setModal("import-mt5")}>↑ Import MT5</button>
         </div>
       </div>
 
@@ -1431,7 +1432,7 @@ export default function App() {
             fmtDollars={fmtDollars}
           />
         )}
-        {page==="dashboard"&&<><SyncPanel onMerge={handleMerge} T={T}/><Dashboard trades={filteredTrades} accounts={data.accounts} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/></>}
+        {page==="dashboard"&&<Dashboard trades={filteredTrades} accounts={data.accounts} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
         {page==="trades"&&(
           <div>
             <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
@@ -1463,6 +1464,13 @@ export default function App() {
 
       {modal==="account"&&<AccountForm acct={editItem} onSave={saveAccount} onClose={()=>setModal(null)}/>}
       {modal==="import"&&<TradovateImportModal accounts={data.accounts} settings={data.settings} existingBuyFillIds={data.trades.map(t=>t.fill?.buyFillId).filter(Boolean)} existingJournalMap={new Map(data.trades.map(t=>[t.fill?.buyFillId,t.journal]).filter(([id])=>id))} onImport={importTrades} onClose={()=>setModal(null)}/>}
+      {modal==="import-mt5"&&(
+        <Mt5ImportModal
+          accounts={ACCOUNTS}
+          onImport={(trades)=>{ handleMerge(trades); setModal(null); }}
+          onClose={()=>setModal(null)}
+        />
+      )}
       {detailTrade&&(
         <TradeDetailPanel
           trade={detailTrade}

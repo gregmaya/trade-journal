@@ -1,6 +1,6 @@
 // src/accounts.js
-// Static account config — no secrets. Investor passwords live in sessionStorage only.
-// serverAddress: resolve once via Task 6 spike, then fill in permanently here.
+// Static account config — no secrets, no live API needed. Trade data comes from
+// manual MT5 "Save as Report" xlsx exports, imported via the Import MT5 button.
 
 export const ACCOUNTS = [
   {
@@ -9,15 +9,10 @@ export const ACCOUNTS = [
     propFirm: 'FundingPips',
     platform: 'mt5',
     login: '20123435',
-    serverName: 'FundingPips-SIM1',
-    serverAddress: '', // TODO: fill after Task 6 spike
     currency: 'USD',
     initialBalance: 25000,
-    profitTarget: 26250,   // +5%
+    profitTarget: 26250,
     maxDailyLoss: 1250,
     maxTotalLoss: 1500,
   },
-  // Repeat for remaining 3 accounts:
-  // { id, label, propFirm, platform, login, serverName, serverAddress,
-  //   currency, initialBalance, profitTarget, maxDailyLoss, maxTotalLoss }
 ]

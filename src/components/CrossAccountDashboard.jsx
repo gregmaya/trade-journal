@@ -68,7 +68,7 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{acc.label}</div>
-                    <div style={{ fontSize: 11, color: T.hint }}>{acc.propFirm} · {acc.serverName}</div>
+                    <div style={{ fontSize: 11, color: T.hint }}>{acc.propFirm}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontSize: 14, fontWeight: 500, color: pnl >= 0 ? T.green : T.red }}>
