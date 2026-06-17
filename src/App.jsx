@@ -1264,7 +1264,7 @@ export default function App() {
   const [storageReady, setStorageReady] = useState(false);
   const [storageFallback, setStorageFallback] = useState(false);
   const [writeError, setWriteError] = useState(null);
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState("overview");
   const [modal, setModal] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [detailTrade, setDetailTrade] = useState(null);

@@ -46,13 +46,19 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
             const trades = mt5Trades.filter(t => t.accountId === acc.id)
             const pnl = trades.reduce((s, t) => s + t.pnl, 0)
             const balance = acc.initialBalance + pnl
-            const gained = pnl
-            const targetGap = acc.profitTarget - acc.initialBalance
-            const targetProgress = Math.min(Math.max(gained / targetGap, 0), 1)
-            const ddUsed = Math.max(acc.initialBalance - balance, 0)
-            const ddPct = acc.maxTotalLoss > 0 ? ddUsed / acc.maxTotalLoss : 0
 
-            const status = gained >= targetGap ? 'passed'
+            // Static drawdown floor — fixed % of initialBalance, never moves with peak balance
+            const floor = acc.initialBalance * (1 - acc.maxLossPct)
+            const maxLossAmount = acc.initialBalance * acc.maxLossPct
+            const ddUsed = Math.max(acc.initialBalance - balance, 0)
+            const ddPct = maxLossAmount > 0 ? ddUsed / maxLossAmount : 0
+
+            // Phase target — measured from the current phase's own starting balance
+            const gainedSincePhaseStart = balance - acc.phaseStartBalance
+            const targetGap = acc.phaseStartBalance * acc.phaseTargetPct
+            const targetProgress = targetGap > 0 ? Math.min(Math.max(gainedSincePhaseStart / targetGap, 0), 1) : 0
+
+            const status = gainedSincePhaseStart >= targetGap ? 'passed'
               : ddPct >= 1 ? 'blown'
               : ddPct >= 0.7 ? 'at_risk'
               : pnl < 0 ? 'in_drawdown'
@@ -68,11 +74,14 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{acc.label}</div>
-                    <div style={{ fontSize: 11, color: T.hint }}>{acc.propFirm}</div>
+                    <div style={{ fontSize: 11, color: T.hint }}>{acc.propFirm} · {acc.botName}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ fontSize: 14, fontWeight: 500, color: pnl >= 0 ? T.green : T.red }}>
                       {fmtDollars(pnl)}
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: T.indigo, background: T.indigoBg, padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Phase {acc.phase}
                     </span>
                     <span style={{ fontSize: 11, fontWeight: 600, color: statusColors[status], background: statusColors[status] + '18', padding: '2px 8px', borderRadius: 4, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                       {status.replaceAll('_', ' ')}
@@ -84,7 +93,7 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: T.hint, marginBottom: 3 }}>
                     <span>Profit target</span>
-                    <span>{fmtDollars(gained)} / {fmtDollars(targetGap)}</span>
+                    <span>{fmtDollars(gainedSincePhaseStart)} / {fmtDollars(targetGap)}</span>
                   </div>
                   <div style={{ height: 5, background: T.border, borderRadius: 3, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${targetProgress * 100}%`, background: T.green, borderRadius: 3, transition: 'width 0.3s' }} />
@@ -95,7 +104,7 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: T.hint, marginBottom: 3 }}>
                     <span>Drawdown used</span>
-                    <span>{fmtDollars(ddUsed)} / {fmtDollars(acc.maxTotalLoss)}</span>
+                    <span>{fmtDollars(ddUsed)} / {fmtDollars(maxLossAmount)}</span>
                   </div>
                   <div style={{ height: 5, background: T.border, borderRadius: 3, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${Math.min(ddPct * 100, 100)}%`, background: ddPct >= 0.7 ? T.red : T.yellow, borderRadius: 3, transition: 'width 0.3s' }} />
