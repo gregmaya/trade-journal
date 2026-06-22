@@ -20,7 +20,6 @@
  * @property {string[]} tags
  * @property {string}  notes
  * @property {'london'|'new_york'|'overlap'|'other'} sessionLabel
- * @property {string[]} ruleViolations
  * @property {'win'|'loss'|'be'} classification
  * @property {'mtconnect'|'python'|'manual'} syncSource
  * @property {string}  syncedAt       — ISO8601

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeStats, computeSessionBreakdown, computeSymbolBreakdown, computeDailyPnl } from '../utils/analytics.js'
+import { computeStats, computeSymbolBreakdown, computeDailyPnl } from '../utils/analytics.js'
 
 const WIN  = { id: '1', pnl: 100, classification: 'win',  sessionLabel: 'new_york', symbol: 'EURUSD', openTime: '2024-06-17T13:30:00Z', closeTime: '2024-06-17T14:00:00Z' }
 const LOSS = { id: '2', pnl: -50, classification: 'loss', sessionLabel: 'london',   symbol: 'EURUSD', openTime: '2024-06-17T07:30:00Z', closeTime: '2024-06-17T08:00:00Z' }
@@ -22,15 +22,6 @@ describe('computeStats', () => {
     const s = computeStats([])
     expect(s.total).toBe(0)
     expect(s.profitFactor).toBeNull()
-  })
-})
-
-describe('computeSessionBreakdown', () => {
-  it('groups by session', () => {
-    const bd = computeSessionBreakdown([WIN, LOSS, BE])
-    expect(bd.new_york.winCount).toBe(1)
-    expect(bd.london.lossCount).toBe(1)
-    expect(bd.overlap.total).toBe(0)
   })
 })
 

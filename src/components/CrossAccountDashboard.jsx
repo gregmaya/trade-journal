@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { computeStats, computeDailyPnl } from '../utils/analytics.js'
+import { computeStats, computeDailyPnl, computeProfitPctSeries } from '../utils/analytics.js'
 import { MonthlyCalendar } from './MonthlyCalendar.jsx'
+import { CombinedProfitChart } from './CombinedProfitChart.jsx'
 
 // Small local Metric chip — do NOT import KpiCard (it doesn't exist in this codebase)
 function Metric({ label, value, color, T }) {
@@ -13,29 +14,31 @@ function Metric({ label, value, color, T }) {
   )
 }
 
-export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
+export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars, onSelectAccount }) {
   // Only use MT5-format trades (openTime field distinguishes them from Tradovate)
   const mt5Trades = allTrades.filter(t => t.openTime !== undefined)
 
-  const totalPnl = mt5Trades.reduce((s, t) => s + t.pnl, 0)
-  const stats = computeStats(mt5Trades)
   const dailyPnl = computeDailyPnl(mt5Trades)
 
   const now = new Date()
   const [calYear, setCalYear] = useState(now.getFullYear())
   const [calMonth, setCalMonth] = useState(now.getMonth() + 1)
 
+  // Reference lines for the combined chart — derived from the first account's
+  // phase/loss percentages, since all current accounts share the same 10%/10%.
+  const refAccount = accounts[0]
+  const profitPct = refAccount ? refAccount.phaseTargetPct * 100 : null
+  const drawdownPct = refAccount ? -refAccount.maxLossPct * 100 : null
+  const seriesByAccount = Object.fromEntries(
+    accounts.map(acc => [acc.id, computeProfitPctSeries(acc, mt5Trades.filter(t => t.accountId === acc.id))])
+  )
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {/* Aggregate summary */}
+      {/* Combined profit % chart */}
       <div>
-        <div style={{ fontSize: 13, fontWeight: 500, color: T.hint, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 12 }}>All Accounts</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
-          <Metric label="Net P&L" value={fmtDollars(totalPnl)} color={totalPnl >= 0 ? T.green : T.red} T={T} />
-          <Metric label="Total Trades" value={stats.total} T={T} />
-          <Metric label="Win Rate" value={stats.total > 0 ? `${Math.round(stats.winRate * 100)}%` : '—'} color={stats.winRate >= 0.5 ? T.green : T.red} T={T} />
-          <Metric label="Profit Factor" value={stats.profitFactor != null ? stats.profitFactor.toFixed(2) : '—'} color={stats.profitFactor != null ? (stats.profitFactor >= 1.5 ? T.green : stats.profitFactor >= 1 ? T.yellow : T.red) : T.hint} T={T} />
-        </div>
+        <div style={{ fontSize: 13, fontWeight: 500, color: T.hint, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 12 }}>Profit % — All Accounts</div>
+        <CombinedProfitChart accounts={accounts} seriesByAccount={seriesByAccount} profitPct={profitPct} drawdownPct={drawdownPct} T={T} />
       </div>
 
       {/* Per-account status cards */}
@@ -46,6 +49,7 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
             const trades = mt5Trades.filter(t => t.accountId === acc.id)
             const pnl = trades.reduce((s, t) => s + t.pnl, 0)
             const balance = acc.initialBalance + pnl
+            const stats = computeStats(trades)
 
             // Static drawdown floor — fixed % of initialBalance, never moves with peak balance
             const floor = acc.initialBalance * (1 - acc.maxLossPct)
@@ -70,7 +74,8 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
             }
 
             return (
-              <div key={acc.id} style={{ background: T.surface, borderRadius: 8, padding: 14, border: `0.5px solid ${T.border}` }}>
+              <div key={acc.id} onClick={() => onSelectAccount(acc.id)}
+                style={{ background: T.surface, borderRadius: 8, padding: 14, border: `0.5px solid ${T.border}`, cursor: 'pointer' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{acc.label}</div>
@@ -109,6 +114,13 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars }) {
                   <div style={{ height: 5, background: T.border, borderRadius: 3, overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${Math.min(ddPct * 100, 100)}%`, background: ddPct >= 0.7 ? T.red : T.yellow, borderRadius: 3, transition: 'width 0.3s' }} />
                   </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: 8, marginTop: 10 }}>
+                  <Metric label="Win Rate" value={stats.total > 0 ? `${Math.round(stats.winRate * 100)}%` : '—'} color={stats.winRate >= 0.5 ? T.green : T.red} T={T} />
+                  <Metric label="Profit Factor" value={stats.profitFactor != null ? stats.profitFactor.toFixed(2) : '—'} color={stats.profitFactor != null ? (stats.profitFactor >= 1.5 ? T.green : stats.profitFactor >= 1 ? T.yellow : T.red) : T.hint} T={T} />
+                  <Metric label="Avg Win" value={fmtDollars(stats.avgWin)} color={T.green} T={T} />
+                  <Metric label="Avg Loss" value={fmtDollars(-stats.avgLoss)} color={T.red} T={T} />
                 </div>
 
                 <div style={{ fontSize: 11, color: T.hint, marginTop: 8 }}>

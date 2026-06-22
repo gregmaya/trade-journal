@@ -96,7 +96,6 @@ export function TradeLog({trades, accounts, settings={}, onEdit, onDelete}) {
                 <TH>Strategy</TH>
                 <TH>Account</TH>
                 <TH>★</TH>
-                <TH>Rules</TH>
                 <TH></TH>
               </tr></thead>
               <tbody>
@@ -120,17 +119,6 @@ export function TradeLog({trades, accounts, settings={}, onEdit, onDelete}) {
                       <TD>{j.strategy?<Tag s={j.strategy}/>:"—"}</TD>
                       <TD style={{color:T.muted,fontSize:11}}>{aMap[j.accountId]||"—"}</TD>
                       <TD><Stars value={j.rating||0}/></TD>
-                      <TD>
-                        {t.ruleViolations?.length > 0 && (
-                          <span style={{
-                            background: T.indigoBg, color: T.indigo,
-                            borderRadius: 4, padding: '2px 6px', fontSize: 10, fontWeight: 500,
-                            border: `0.5px solid ${T.indigo}40`
-                          }}>
-                            {t.ruleViolations.length} rule{t.ruleViolations.length > 1 ? 's' : ''}
-                          </span>
-                        )}
-                      </TD>
                       <TD onClick={e=>e.stopPropagation()}>
                         <button style={btn("danger")} onClick={()=>onDelete(f.buyFillId)}>✕</button>
                       </TD>

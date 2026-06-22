@@ -2,14 +2,13 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from "recharts";
 import { fsaSupported, hasHandle, openFile, createFile, readData, writeData, readLocalStorage, defaultData, mergeTrades } from "./storage.js";
 import { parseTradovateCSV, convertToNY } from "./utils/tradovate.js";
-import { fmtDollars, fmtTicks, fmtR as fmtRUtil, computeR, computeWinStats, computeDrawdownSeries } from "./utils/compute.js";
+import { fmtDollars, fmtTicks, fmtR as fmtRUtil, computeR } from "./utils/compute.js";
 import { AccountCard } from "./components/AccountCard.jsx";
 import { TradeLog } from "./components/TradeLog.jsx";
 import { Mt5ImportModal } from "./components/Mt5ImportModal.jsx";
+import { Mt5AccountAnalytics } from "./components/Mt5AccountAnalytics.jsx";
 import { T, btn, Card } from "./utils/theme.jsx";
 import { getOutcome, entryTimestamp, exitTimestamp, fmtTicksInt } from "./utils/tradeHelpers.js";
-import { applyRules, computeAdherence, DEFAULT_RULES } from './utils/rules.js';
-import { RulesConfig } from './components/RulesConfig.jsx';
 import { CrossAccountDashboard } from './components/CrossAccountDashboard.jsx';
 import { ACCOUNTS } from './accounts.js';
 
@@ -19,10 +18,6 @@ function uid() { return Date.now().toString(36) + Math.random().toString(36).sli
 const DIRECTIONS = ["Long","Short"];
 
 function fmtR(n) { return fmtRUtil(n); }
-function fmtD(n) {
-  if (n == null) return "—";
-  return (n < 0 ? "-" : "") + "$" + Math.abs(Math.round(n)).toLocaleString();
-}
 
 // Direction-aware fill helpers (local aliases)
 function entryPrice(fill) {
@@ -586,213 +581,28 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, existing
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-function Dashboard({trades, accounts, strategies=[], settings={}}) {
-  const wins=trades.filter(t=>getOutcome(t,settings)==="win");
-  const losses=trades.filter(t=>getOutcome(t,settings)==="loss");
-  const bes=trades.filter(t=>getOutcome(t,settings)==="be");
-  const netDollars=trades.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
-  const netTicks=trades.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0);
-  const stats=computeWinStats(trades, settings.beThresholdUsd ?? 50);
-  const grossWins=wins.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
-  const grossLoss=Math.abs(losses.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0));
-  const pf=grossLoss>0?grossWins/grossLoss:null;
-  const todayStr=new Date().toISOString().slice(0,10);
-  const todayCount=trades.filter(t=>(t.fill?.boughtTimestamp||"").startsWith(todayStr)).length;
+// MT5 account deep-dive — renders Mt5AccountAnalytics for each selected account
+// (or all accounts when none are selected). Reached by clicking an Overview card.
+function Dashboard({selectedIds, mt5Trades, fmtDollars, dailyBotAssignments, onAssignBots}) {
+  const accounts = selectedIds.length===0 ? ACCOUNTS : ACCOUNTS.filter(a=>selectedIds.includes(a.id));
 
-  // equity curve — sort by boughtTimestamp, cumulative netPnlDollars
-  const sorted=[...trades].sort((a,b)=>{
-    const da=a.fill?.boughtTimestamp||"";
-    const db=b.fill?.boughtTimestamp||"";
-    return da>db?1:-1;
-  });
-  let cum=0;
-  const eqData=sorted.map((t,i)=>{cum+=(t.fill?.netPnlDollars||0);return{n:i+1,pnl:parseFloat(cum.toFixed(2))};});
-
-  // strat breakdown — net dollars per strategy
-  const stratData=strategies.map(s=>{
-    const g=trades.filter(t=>t.journal?.strategy===s);
-    const netD=parseFloat(g.reduce((sum,t)=>sum+(t.fill?.netPnlDollars||0),0).toFixed(2));
-    return {s, count:g.length, netD};
-  }).filter(x=>x.count>0);
-
-  // calendar — current month, group by fill.boughtTimestamp date
-  const now=new Date(); const yr=now.getFullYear(), mo=now.getMonth();
-  const byDate={};
-  trades.forEach(t=>{
-    const ts=t.fill?.boughtTimestamp||"";
-    if(!ts) return;
-    try{
-      const d=new Date(ts);
-      if(d.getFullYear()===yr&&d.getMonth()===mo){
-        const k=d.getDate();
-        if(!byDate[k]) byDate[k]=[];
-        byDate[k].push(t);
-      }
-    }catch{}
-  });
-  const fd=new Date(yr,mo,1).getDay();
-  const calDim=new Date(yr,mo+1,0).getDate();
-
-  const [tooltip,setTooltip]=useState(null);
-  const Metric=({label, value, color=T.text, sub, info})=>(
-    <div style={{background:T.surface,borderRadius:"var(--border-radius-md)",padding:"12px 14px",position:"relative"}}>
-      <div style={{fontSize:11,color:T.hint,marginBottom:4,display:"flex",alignItems:"center",gap:4}}>
-        {label}
-        {info&&<span
-          style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:13,height:13,borderRadius:"50%",border:`0.5px solid ${T.border2}`,fontSize:9,cursor:"pointer",color:T.hint,lineHeight:1,flexShrink:0}}
-          onMouseEnter={e=>{const r=e.currentTarget.getBoundingClientRect();setTooltip({text:info,x:r.left,y:r.bottom+4});}}
-          onMouseLeave={()=>setTooltip(null)}
-        >?</span>}
-      </div>
-      <div style={{fontSize:22,fontWeight:500,color}}>{value}</div>
-      {sub&&<div style={{fontSize:11,color:T.hint,marginTop:2}}>{sub}</div>}
-    </div>
-  );
-
-  const avgProfitableTicks=wins.length>0?wins.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0)/wins.length:null;
-  const ruledTrades = trades.filter(t => t.openTime !== undefined);
-  const { adherenceRate } = computeAdherence(ruledTrades);
-  const sortedAccounts=[...accounts].sort((a,b)=>{
-    const lastA=trades.filter(t=>t.journal?.accountId===a.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
-    const lastB=trades.filter(t=>t.journal?.accountId===b.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
-    return lastB>lastA?1:-1;
-  });
+  if (accounts.length===0) {
+    return <div style={{padding:40,textAlign:"center",color:T.hint,fontSize:13}}>No accounts configured in accounts.js</div>;
+  }
 
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      {tooltip&&<div style={{position:"fixed",left:tooltip.x,top:tooltip.y,zIndex:9999,background:T.card,border:`0.5px solid ${T.border2}`,borderRadius:6,padding:"6px 10px",fontSize:11,color:T.muted,maxWidth:220,pointerEvents:"none",boxShadow:"0 4px 12px rgba(0,0,0,0.2)"}}>{tooltip.text}</div>}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10}}>
-        <Metric label="Net P&L ($)" value={fmtDollars(netDollars)} color={netDollars>=0?T.green:T.red} sub={`${trades.length} trades`}/>
-        <Metric label="Avg win (ticks)" value={avgProfitableTicks!=null?fmtTicks(avgProfitableTicks):"—"} color={T.green} sub="avg of winning trades" info="Average net ticks of trades classified as wins. Use this as a size target for new trades."/>
-        <Metric label="Win %" value={stats.winPct!=null?stats.winPct.toFixed(0)+"%":"—"} color={stats.winPct==null?T.hint:stats.winPct>=50?T.green:stats.winPct>=40?T.yellow:T.red} sub={`${stats.wins}W / ${stats.losses}L`} info="Wins ÷ (wins + losses). BE trades are excluded from the denominator."/>
-        <Metric label="BE %" value={stats.bePct!=null?stats.bePct.toFixed(0)+"%":"—"} color={T.yellow} sub={`${stats.bes} BE`} info={`Trades within ±$${settings.beThresholdUsd??50} net P&L — classified as break-even.`}/>
-        <Metric label="Profit factor" value={pf!=null?pf.toFixed(2):"—"} color={pf==null?T.hint:pf>=1.5?T.green:pf>=1?T.yellow:T.red} info="Gross profit of winning trades ÷ gross loss of losing trades. Above 1.5 is strong."/>
-        <Metric label="Trades today" value={todayCount} color={T.text}/>
-        <Metric label="Rule adherence" value={ruledTrades.length > 0 ? `${Math.round(adherenceRate * 100)}%` : '—'} color={ruledTrades.length > 0 ? (adherenceRate >= 0.8 ? T.green : adherenceRate >= 0.6 ? T.yellow : T.red) : T.hint}/>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-        <Card>
-          <CardHead title="Cumulative P&L ($)"/>
-          <div style={{padding:"14px 14px 10px"}}>
-            {eqData.length>1
-              ? <ResponsiveContainer width="100%" height={160}>
-                  <LineChart data={eqData} margin={{top:4,right:4,left:0,bottom:0}}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
-                    <XAxis dataKey="n" hide/>
-                    <YAxis tickLine={false} axisLine={false} tick={{fontSize:10,fill:T.hint}} tickFormatter={v=>fmtDollars(v)} width={48}/>
-                    <Tooltip formatter={v=>[fmtDollars(v),"Cumulative P&L"]} contentStyle={{background:T.card,border:`0.5px solid ${T.border2}`,borderRadius:6,fontSize:11}}/>
-                    <ReferenceLine y={0} stroke={T.border2} strokeDasharray="3 3"/>
-                    <Line type="monotone" dataKey="pnl" stroke={T.green} strokeWidth={2} dot={false}/>
-                  </LineChart>
-                </ResponsiveContainer>
-              : <div style={{height:160,display:"flex",alignItems:"center",justifyContent:"center",color:T.hint,fontSize:12}}>No trades yet</div>
-            }
-          </div>
-        </Card>
-
-        <Card>
-          <CardHead title="Strategy performance"/>
-          <div style={{padding:"14px"}}>
-            {stratData.length>0
-              ? <ResponsiveContainer width="100%" height={160}>
-                  <BarChart data={stratData} layout="vertical" margin={{top:0,right:8,left:8,bottom:0}}>
-                    <XAxis type="number" hide/>
-                    <YAxis dataKey="s" type="category" tickLine={false} axisLine={false} tick={{fontSize:11,fill:T.muted}} width={60}/>
-                    <Tooltip formatter={v=>[fmtDollars(v),"Net P&L"]} contentStyle={{background:T.card,border:`0.5px solid ${T.border2}`,borderRadius:6,fontSize:11}}/>
-                    <ReferenceLine x={0} stroke={T.border2}/>
-                    <Bar dataKey="netD" fill={T.green}
-                      label={({x,y,width,height,value})=>{
-                        if(Math.abs(width)<38) return null;
-                        const neg=value<0;
-                        const lx=neg?x+width+4:x+width-4;
-                        return <text x={lx} y={y+height/2+4} textAnchor={neg?"start":"end"} fontSize={10} fill="#fff" fillOpacity={0.85}>{fmtDollars(value)}</text>;
-                      }}
-                      shape={({x,y,width,height,value})=>{
-                        const fill=value>=0?T.green:T.red;
-                        const bx=width<0?x+width:x;
-                        return <rect x={bx} y={y} width={Math.abs(width)} height={height} fill={fill} fillOpacity={0.8} rx={3} ry={3}/>;
-                      }}/>
-                  </BarChart>
-                </ResponsiveContainer>
-              : <div style={{height:160,display:"flex",alignItems:"center",justifyContent:"center",color:T.hint,fontSize:12}}>No trades yet</div>
-            }
-          </div>
-        </Card>
-      </div>
-
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
-        <Card>
-          <CardHead title={`Performance calendar — ${now.toLocaleString("default",{month:"long"})} ${yr}`}/>
-          <div style={{padding:"12px 14px"}}>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:6}}>
-              {["Su","Mo","Tu","We","Th","Fr","Sa"].map(d=>(
-                <div key={d} style={{textAlign:"center",fontSize:10,color:T.hint,padding:"2px 0"}}>{d}</div>
-              ))}
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3}}>
-              {Array.from({length:fd},(_,i)=><div key={"e"+i}/>)}
-              {Array.from({length:calDim},(_,i)=>{
-                const day=i+1, ts=byDate[day];
-                const dayPnl=ts?ts.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0):null;
-                const dayCount=ts?ts.length:0;
-                const [bg,color]=dayPnl==null?[T.surface,T.hint]:dayPnl>0?[T.greenBg,T.green]:dayPnl<0?[T.redBg,T.red]:[T.yellowBg,T.yellow];
-                return (
-                  <div key={day} style={{aspectRatio:"1",borderRadius:4,background:bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",fontSize:9,color}}>
-                    <span>{day}</span>
-                    {dayPnl!=null&&<span style={{fontSize:8,opacity:0.9}}>{fmtDollars(dayPnl)}</span>}
-                    {dayCount>0&&<span style={{fontSize:7,opacity:0.7}}>{dayCount} {dayCount===1?"trade":"trades"}</span>}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </Card>
-
-        <Card>
-          <CardHead title="Accounts"/>
-          <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",gap:10}}>
-            {accounts.length===0&&<div style={{fontSize:12,color:T.hint,textAlign:"center",padding:"12px 0"}}>No accounts yet</div>}
-            {sortedAccounts.map(a=>{
-              const acctTrades=trades.filter(t=>t.journal?.accountId===a.id);
-              const netPnl=acctTrades.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
-              const currentBalance=a.startingBalance+netPnl;
-              const pnl=currentBalance-a.startingBalance;
-              const showDD=a.type==="eval"||a.type==="pa";
-              const series=showDD?computeDrawdownSeries(a,acctTrades):[];
-              const last=series.length>0?series[series.length-1]:null;
-              const floor=last?last.floor:(a.startingBalance-(a.drawdownBuffer||0));
-              const buf=currentBalance-floor;
-              const pct=a.drawdownBuffer>0?Math.max(0,Math.min(100,buf/a.drawdownBuffer*100)):null;
-              return (
-                <div key={a.id} style={{padding:"10px 12px",background:T.surface,borderRadius:8,border:`0.5px solid ${T.border}`}}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:500}}>{a.name}</div>
-                      <div style={{fontSize:10,color:T.hint}}>{a.type} · {a.broker}</div>
-                    </div>
-                    <div style={{textAlign:"right"}}>
-                      <div style={{fontSize:14,fontWeight:500,color:pnl>=0?T.green:T.red}}>{fmtD(pnl)}</div>
-                      <div style={{fontSize:9,color:T.hint}}>P&L</div>
-                    </div>
-                  </div>
-                  {showDD&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
-                    {[["Balance",fmtD(currentBalance),T.text],["DD Floor",fmtD(floor),T.red],["Buffer",fmtD(buf),buf<1000?T.red:T.yellow]].map(([l,v,c])=>(
-                      <div key={l}><div style={{fontSize:9,color:T.hint,marginBottom:2}}>{l}</div><div style={{fontSize:12,fontWeight:500,color:c}}>{v}</div></div>
-                    ))}
-                  </div>}
-                  {pct!=null&&<>
-                    <div style={{height:4,background:T.border,borderRadius:2,overflow:"hidden"}}>
-                      <div style={{height:"100%",width:pct+"%",background:pct>50?T.green:pct>25?T.yellow:T.red,borderRadius:2,transition:"width 0.3s"}}/>
-                    </div>
-                    <div style={{fontSize:9,color:T.hint,marginTop:3,textAlign:"right"}}>{pct.toFixed(0)}% buffer remaining</div>
-                  </>}
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      </div>
+    <div style={{display:"flex",flexDirection:"column",gap:32}}>
+      {accounts.map(acc=>(
+        <Mt5AccountAnalytics
+          key={acc.id}
+          account={acc}
+          trades={mt5Trades.filter(t=>t.accountId===acc.id)}
+          T={T}
+          fmtDollars={fmtDollars}
+          dailyBotAssignments={dailyBotAssignments[acc.id]||{}}
+          onAssignBots={(date,bots)=>onAssignBots(acc.id,date,bots)}
+        />
+      ))}
     </div>
   );
 }
@@ -1186,18 +996,6 @@ function SettingsPage({data, onDataChange}) {
           </div>
         </div>
       </Card>
-
-      {/* Section 6: Personal rules */}
-      <Card>
-        <CardHead title="Personal rules"/>
-        <div style={{padding:"14px"}}>
-          <RulesConfig
-            rules={settings.rules ?? DEFAULT_RULES}
-            onChange={newRules => patchSettings({rules: newRules})}
-            T={T}
-          />
-        </div>
-      </Card>
     </div>
   );
 }
@@ -1269,7 +1067,7 @@ export default function App() {
   const [editItem, setEditItem] = useState(null);
   const [detailTrade, setDetailTrade] = useState(null);
   const [selectedAccIds, setSelectedAccIds] = useState([]);
-  const [ruleFilter, setRuleFilter] = useState(false);
+  const [selectedMt5AccIds, setSelectedMt5AccIds] = useState([]);
   const openingRef = useRef(false);
 
   useEffect(() => {
@@ -1356,17 +1154,30 @@ export default function App() {
     setModal(null);
   }
   async function handleMerge(incomingTrades) {
-    const rules = data.settings?.rules ?? DEFAULT_RULES;
-    const tagged = applyRules(incomingTrades, rules);
-    const merged = mergeTrades(data.trades, tagged);
+    const merged = mergeTrades(data.trades, incomingTrades);
     const nextData = { ...data, trades: merged };
     setData(nextData);
+  }
+  function assignBots(accountId, date, bots) {
+    setData({
+      ...data,
+      dailyBotAssignments: {
+        ...data.dailyBotAssignments,
+        [accountId]: { ...(data.dailyBotAssignments?.[accountId] || {}), [date]: bots },
+      },
+    });
   }
 
   const PAGES=[["overview","Overview"],["dashboard","Dashboard"],["trades","Trades"],["analytics","Analytics"],["accounts","Accounts"],["settings","Settings"]];
   const filteredTrades=selectedAccIds.length===0?data.trades:data.trades.filter(t=>selectedAccIds.includes(t.journal?.accountId));
   function toggleAccId(id) {
     setSelectedAccIds(prev=>{
+      if(prev.includes(id)) return prev.length===1?[]:prev.filter(x=>x!==id);
+      return [...prev,id];
+    });
+  }
+  function toggleMt5AccId(id) {
+    setSelectedMt5AccIds(prev=>{
       if(prev.includes(id)) return prev.length===1?[]:prev.filter(x=>x!==id);
       return [...prev,id];
     });
@@ -1405,8 +1216,8 @@ export default function App() {
         </div>
       </div>
 
-      {/* Account filter bar — shown on Dashboard and Analytics */}
-      {(page==="dashboard"||page==="analytics")&&data.accounts.length>0&&(
+      {/* Account filter bar — shown on Analytics (Tradovate accounts) */}
+      {page==="analytics"&&data.accounts.length>0&&(
         <div style={{background:T.card,borderBottom:`0.5px solid ${T.border}`,padding:"6px 20px",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:11,color:T.hint,marginRight:2}}>Account:</span>
           <button
@@ -1422,6 +1233,23 @@ export default function App() {
         </div>
       )}
 
+      {/* MT5 account filter bar — shown on Dashboard */}
+      {page==="dashboard"&&(
+        <div style={{background:T.card,borderBottom:`0.5px solid ${T.border}`,padding:"6px 20px",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:11,color:T.hint,marginRight:2}}>Account:</span>
+          <button
+            onClick={()=>setSelectedMt5AccIds([])}
+            style={{...btn(selectedMt5AccIds.length===0?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
+          >All</button>
+          {ACCOUNTS.map(a=>(
+            <button key={a.id}
+              onClick={()=>toggleMt5AccId(a.id)}
+              style={{...btn(selectedMt5AccIds.includes(a.id)?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
+            >{a.label}</button>
+          ))}
+        </div>
+      )}
+
       {/* Content */}
       <div style={{padding:"20px",maxWidth:1100,margin:"0 auto"}}>
         {page==="overview"&&(
@@ -1430,32 +1258,26 @@ export default function App() {
             allTrades={data.trades}
             T={T}
             fmtDollars={fmtDollars}
+            onSelectAccount={id=>{setSelectedMt5AccIds([id]);setPage("dashboard");}}
           />
         )}
-        {page==="dashboard"&&<Dashboard trades={filteredTrades} accounts={data.accounts} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
+        {page==="dashboard"&&(
+          <Dashboard
+            selectedIds={selectedMt5AccIds}
+            mt5Trades={data.trades.filter(t=>t.platform==="mt5")}
+            fmtDollars={fmtDollars}
+            dailyBotAssignments={data.dailyBotAssignments||{}}
+            onAssignBots={assignBots}
+          />
+        )}
         {page==="trades"&&(
-          <div>
-            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
-              <button
-                onClick={()=>setRuleFilter(v=>!v)}
-                style={{...btn(ruleFilter?'primary':'ghost'),padding:'4px 10px',fontSize:12}}
-              >
-                {ruleFilter ? 'Showing: rule-compliant only' : 'Show: all trades'}
-              </button>
-              {ruleFilter&&(
-                <span style={{fontSize:12,color:T.hint}}>
-                  Filtering out {data.trades.filter(t=>t.ruleViolations?.length>0).length} violation trades
-                </span>
-              )}
-            </div>
-            <TradeLog
-              trades={ruleFilter ? data.trades.filter(t=>!t.ruleViolations?.length) : data.trades}
-              accounts={data.accounts}
-              settings={data.settings||{}}
-              onEdit={setDetailTrade}
-              onDelete={deleteTrade}
-            />
-          </div>
+          <TradeLog
+            trades={data.trades}
+            accounts={data.accounts}
+            settings={data.settings||{}}
+            onEdit={setDetailTrade}
+            onDelete={deleteTrade}
+          />
         )}
         {page==="analytics"&&<Analytics trades={filteredTrades} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
         {page==="accounts"&&<AccountsPage accounts={data.accounts} trades={data.trades} settings={data.settings||{}} onAdd={()=>{setEditItem(null);setModal("account");}} onEdit={a=>{setEditItem(a);setModal("account");}} onDelete={deleteAccount}/>}

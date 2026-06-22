@@ -43,15 +43,6 @@ function avgDuration(trades) {
   return durations.length ? durations.reduce((a, b) => a + b, 0) / durations.length : 0
 }
 
-/** P&L and win rate grouped by session label */
-export function computeSessionBreakdown(trades) {
-  const sessions = ['london', 'overlap', 'new_york', 'other']
-  return Object.fromEntries(sessions.map(s => {
-    const group = trades.filter(t => t.sessionLabel === s)
-    return [s, computeStats(group)]
-  }))
-}
-
 /** P&L and win rate by day of week */
 export function computeDayOfWeekBreakdown(trades) {
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
@@ -106,4 +97,19 @@ export function computeDailyPnl(trades) {
     days[day] = (days[day] ?? 0) + t.pnl
   }
   return days // { '2024-06-15': 125.50, ... }
+}
+
+/**
+ * Cumulative profit % series for an account, keyed by date.
+ * pct = cumulativePnl / account.initialBalance * 100 (static denominator,
+ * matching the static drawdown-floor model used elsewhere for this account type).
+ */
+export function computeProfitPctSeries(account, trades) {
+  const daily = computeDailyPnl(trades)
+  const dates = Object.keys(daily).sort()
+  let cum = 0
+  return dates.map(date => {
+    cum += daily[date]
+    return { date, pct: (cum / account.initialBalance) * 100 }
+  })
 }

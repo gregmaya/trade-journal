@@ -40,7 +40,6 @@ export function mapMtConnectTrade(raw, accountId, beThresholdUsd = 50) {
     tags:         [],
     notes:        '',
     sessionLabel: labelSession(openTime),
-    ruleViolations: [],
     classification: classifyPnl(pnl, beThresholdUsd),
     syncSource:   'mtconnect',
     syncedAt:     new Date().toISOString(),

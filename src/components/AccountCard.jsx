@@ -4,10 +4,9 @@ import { DrawdownChart } from "./DrawdownChart.jsx";
 import { T, btn, Card } from "../utils/theme.jsx";
 import { getOutcome } from "../utils/tradeHelpers.js";
 import {
-  computeStats, computeSessionBreakdown,
+  computeStats,
   computeSymbolBreakdown, computeDailyPnl, computeHourHeatmap,
 } from "../utils/analytics.js";
-import { SessionChart }    from "./SessionChart.jsx";
 import { SymbolTable }     from "./SymbolTable.jsx";
 import { HeatmapChart }    from "./HeatmapChart.jsx";
 import { MonthlyCalendar } from "./MonthlyCalendar.jsx";
@@ -178,8 +177,6 @@ export function AccountCard({a, trades, settings={}, onEdit, onDelete}) {
                     <Metric label="Best Trade"    value={`$${s.bestTrade.toFixed(2)}`}                 color={T.green} />
                     <Metric label="Worst Trade"   value={`$${s.worstTrade.toFixed(2)}`}                color={T.red} />
                   </div>
-
-                  <SessionChart breakdown={computeSessionBreakdown(analyticsTrades)} T={T} />
 
                   <SymbolTable breakdown={computeSymbolBreakdown(analyticsTrades)} T={T} />
 
