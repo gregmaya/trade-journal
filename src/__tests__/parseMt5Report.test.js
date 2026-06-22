@@ -1,7 +1,7 @@
 // src/__tests__/parseMt5Report.test.js
 import { describe, it, expect } from 'vitest'
 import { zipSync, strToU8 } from 'fflate'
-import { parseMt5XlsxReport } from '../utils/parseMt5Report.js'
+import { parseMt5XlsxReport, parseMt5XlsxRows, extractAccountLogin } from '../utils/parseMt5Report.js'
 
 const SHARED = ['Positions', 'XAUUSD', 'buy', 'sell', '2026.06.15 08:49:18', '2026.06.15 10:22:07', 'Orders']
 
@@ -45,6 +45,37 @@ function positionRow(rowNum, { position, symbolIdx, typeIdx, openIdx, closeIdx, 
   </row>`
 }
 const ORDERS_LABEL_ROW = (rowNum) => `<row r="${rowNum}">${strCell('A' + rowNum, 6)}</row>`
+
+const HEADER_SHARED = ['Account:', '26432619 (USD, FivePercentOnline-Real, demo, Hedge)', 'Name:', 'NotANumber']
+function headerRow(rowNum, labelIdx, valueIdx) {
+  return `<row r="${rowNum}">${strCell('A' + rowNum, labelIdx)}${strCell('B' + rowNum, valueIdx)}</row>`
+}
+
+describe('extractAccountLogin', () => {
+  it('extracts the login number from the Account: row', () => {
+    const rowsXml = [
+      headerRow(1, 2, 0), // Name: ...
+      headerRow(2, 0, 1), // Account: 26432619 (USD, ...)
+    ].join('')
+    const buffer = buildReportBuffer({ rowsXml, shared: HEADER_SHARED })
+    const rows = parseMt5XlsxRows(buffer)
+    expect(extractAccountLogin(rows)).toBe('26432619')
+  })
+
+  it('returns null when there is no Account: row', () => {
+    const rowsXml = headerRow(1, 2, 0) // only "Name:" row
+    const buffer = buildReportBuffer({ rowsXml, shared: HEADER_SHARED })
+    const rows = parseMt5XlsxRows(buffer)
+    expect(extractAccountLogin(rows)).toBeNull()
+  })
+
+  it('returns null when the Account: value does not start with digits', () => {
+    const rowsXml = headerRow(1, 0, 3) // Account: NotANumber
+    const buffer = buildReportBuffer({ rowsXml, shared: HEADER_SHARED })
+    const rows = parseMt5XlsxRows(buffer)
+    expect(extractAccountLogin(rows)).toBeNull()
+  })
+})
 
 describe('parseMt5XlsxReport', () => {
   it('parses a single closed position into the Trade schema', () => {

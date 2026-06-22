@@ -62,22 +62,49 @@ function parseSheetRows(xml, sharedStrings) {
 }
 
 /**
- * Parses an MT5 xlsx trade history report and extracts the Positions section
- * (closed round-trip trades) into the normalised Trade schema.
+ * Unzips an MT5 xlsx report and returns its raw sheet rows (cell letter → value).
+ * Includes every row in the sheet, including the header section above "Positions"
+ * (Name/Account/Company/Date) and the Positions/Orders/Deals/Results sections.
  *
  * @param {ArrayBuffer} buffer — raw bytes of the .xlsx file
- * @param {string} accountId
- * @returns {import('./tradeSchema.js').Trade[]}
+ * @returns {Array<Record<string,string>>}
  */
-export function parseMt5XlsxReport(buffer, accountId) {
+export function parseMt5XlsxRows(buffer) {
   const zip = unzipSync(new Uint8Array(buffer))
   const sheetEntry = zip['xl/worksheets/sheet1.xml']
   if (!sheetEntry) throw new Error('Not a valid MT5 report: missing sheet1.xml')
 
   const sharedEntry = zip['xl/sharedStrings.xml']
   const sharedStrings = sharedEntry ? parseSharedStrings(decodeXmlEntry(sharedEntry)) : []
-  const rows = parseSheetRows(decodeXmlEntry(sheetEntry), sharedStrings)
+  return parseSheetRows(decodeXmlEntry(sheetEntry), sharedStrings)
+}
 
+/**
+ * Extracts the account login number from the report's header rows (above
+ * "Positions"). MT5's standard report header has a row like:
+ *   Account:  26432619 (USD, FivePercentOnline-Real, demo, Hedge)
+ * Returns the leading digit run from column B of that row, or null if no
+ * "Account:" row exists or its value doesn't start with digits.
+ *
+ * @param {Array<Record<string,string>>} rows
+ * @returns {string|null}
+ */
+export function extractAccountLogin(rows) {
+  const row = rows.find(r => (r.A || '').trim() === 'Account:')
+  if (!row || !row.B) return null
+  const match = String(row.B).match(/^(\d+)/)
+  return match ? match[1] : null
+}
+
+/**
+ * Extracts the Positions section (closed round-trip trades) from already-parsed
+ * sheet rows into the normalised Trade schema.
+ *
+ * @param {Array<Record<string,string>>} rows
+ * @param {string} accountId
+ * @returns {import('./tradeSchema.js').Trade[]}
+ */
+export function extractPositions(rows, accountId) {
   const positionsLabelIdx = rows.findIndex(r => r.A === 'Positions')
   if (positionsLabelIdx === -1) throw new Error('Not an MT5 report: no "Positions" section found')
   const ordersLabelIdx = rows.findIndex(r => r.A === 'Orders')
@@ -99,4 +126,16 @@ export function parseMt5XlsxReport(buffer, accountId) {
     Swap: r.L,
     Profit: r.M,
   }, accountId))
+}
+
+/**
+ * Parses an MT5 xlsx trade history report and extracts the Positions section
+ * (closed round-trip trades) into the normalised Trade schema.
+ *
+ * @param {ArrayBuffer} buffer — raw bytes of the .xlsx file
+ * @param {string} accountId
+ * @returns {import('./tradeSchema.js').Trade[]}
+ */
+export function parseMt5XlsxReport(buffer, accountId) {
+  return extractPositions(parseMt5XlsxRows(buffer), accountId)
 }
