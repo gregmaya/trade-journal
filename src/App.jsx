@@ -583,16 +583,16 @@ function TradovateImportModal({ accounts, settings, existingBuyFillIds, existing
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 // MT5 account deep-dive — renders Mt5AccountAnalytics for each selected account
 // (or all accounts when none are selected). Reached by clicking an Overview card.
-function Dashboard({selectedIds, mt5Trades, fmtDollars, dailyBotAssignments, onAssignBots}) {
-  const accounts = selectedIds.length===0 ? ACCOUNTS : ACCOUNTS.filter(a=>selectedIds.includes(a.id));
+function Dashboard({selectedIds, accounts, mt5Trades, fmtDollars, dailyBotAssignments, onAssignBots}) {
+  const visibleAccounts = selectedIds.length===0 ? accounts : accounts.filter(a=>selectedIds.includes(a.id));
 
-  if (accounts.length===0) {
-    return <div style={{padding:40,textAlign:"center",color:T.hint,fontSize:13}}>No accounts configured in accounts.js</div>;
+  if (visibleAccounts.length===0) {
+    return <div style={{padding:40,textAlign:"center",color:T.hint,fontSize:13}}>No accounts yet — import an MT5 report to create one.</div>;
   }
 
   return (
     <div style={{display:"flex",flexDirection:"column",gap:32}}>
-      {accounts.map(acc=>(
+      {visibleAccounts.map(acc=>(
         <Mt5AccountAnalytics
           key={acc.id}
           account={acc}
@@ -1168,7 +1168,12 @@ export default function App() {
     });
   }
 
+  function createMt5Account(account) {
+    setData({ ...data, mt5Accounts: [...(data.mt5Accounts || []), account] });
+  }
+
   const PAGES=[["overview","Overview"],["dashboard","Dashboard"],["trades","Trades"],["analytics","Analytics"],["accounts","Accounts"],["settings","Settings"]];
+  const mt5Accounts = [...ACCOUNTS, ...(data.mt5Accounts || [])];
   const filteredTrades=selectedAccIds.length===0?data.trades:data.trades.filter(t=>selectedAccIds.includes(t.journal?.accountId));
   function toggleAccId(id) {
     setSelectedAccIds(prev=>{
@@ -1241,7 +1246,7 @@ export default function App() {
             onClick={()=>setSelectedMt5AccIds([])}
             style={{...btn(selectedMt5AccIds.length===0?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
           >All</button>
-          {ACCOUNTS.map(a=>(
+          {mt5Accounts.map(a=>(
             <button key={a.id}
               onClick={()=>toggleMt5AccId(a.id)}
               style={{...btn(selectedMt5AccIds.includes(a.id)?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
@@ -1254,7 +1259,7 @@ export default function App() {
       <div style={{padding:"20px",maxWidth:1100,margin:"0 auto"}}>
         {page==="overview"&&(
           <CrossAccountDashboard
-            accounts={ACCOUNTS}
+            accounts={mt5Accounts}
             allTrades={data.trades}
             T={T}
             fmtDollars={fmtDollars}
@@ -1264,6 +1269,7 @@ export default function App() {
         {page==="dashboard"&&(
           <Dashboard
             selectedIds={selectedMt5AccIds}
+            accounts={mt5Accounts}
             mt5Trades={data.trades.filter(t=>t.platform==="mt5")}
             fmtDollars={fmtDollars}
             dailyBotAssignments={data.dailyBotAssignments||{}}
@@ -1288,8 +1294,9 @@ export default function App() {
       {modal==="import"&&<TradovateImportModal accounts={data.accounts} settings={data.settings} existingBuyFillIds={data.trades.map(t=>t.fill?.buyFillId).filter(Boolean)} existingJournalMap={new Map(data.trades.map(t=>[t.fill?.buyFillId,t.journal]).filter(([id])=>id))} onImport={importTrades} onClose={()=>setModal(null)}/>}
       {modal==="import-mt5"&&(
         <Mt5ImportModal
-          accounts={ACCOUNTS}
+          accounts={mt5Accounts}
           onImport={(trades)=>{ handleMerge(trades); setModal(null); }}
+          onCreateAccount={createMt5Account}
           onClose={()=>setModal(null)}
         />
       )}
