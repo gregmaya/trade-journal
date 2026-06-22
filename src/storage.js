@@ -83,5 +83,22 @@ export function defaultData() {
       beThresholdTicks: 3,
       commissions: { micro: 1.03, mini: 3.50 },
     },
+    dailyBotAssignments: {},
+    mt5Accounts: [],
   };
+}
+
+/**
+ * Merges incoming trades into existing ones, deduplicating by id.
+ * Existing trade wins on conflict so manual notes/tags/strategy are preserved.
+ * @param {import('./utils/tradeSchema.js').Trade[]} existing
+ * @param {import('./utils/tradeSchema.js').Trade[]} incoming
+ * @returns {import('./utils/tradeSchema.js').Trade[]}
+ */
+export function mergeTrades(existing, incoming) {
+  const byId = new Map(existing.map(t => [t.id, t]))
+  for (const t of incoming) {
+    if (!byId.has(t.id)) byId.set(t.id, t)
+  }
+  return Array.from(byId.values())
 }
