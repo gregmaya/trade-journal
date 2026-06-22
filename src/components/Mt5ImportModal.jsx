@@ -48,12 +48,13 @@ export function Mt5ImportModal({ accounts, onImport, onCreateAccount, onClose })
     const trades = extractPositions(detectedRows, matchedAccount.id)
     if (trades.length === 0) {
       setParseErr('No closed positions found in this report.')
-      return
+      return false
     }
     setAccount(matchedAccount)
     setParsed(trades)
     setParseErr('')
     setStep('preview')
+    return true
   }
 
   function handleFile(file) {
@@ -100,8 +101,9 @@ export function Mt5ImportModal({ accounts, onImport, onCreateAccount, onClose })
       phaseStartBalance: initialBalance,
       phaseTargetPct: 0.10,
     }
-    onCreateAccount(newAccount)
-    finishParse(rows, newAccount)
+    if (finishParse(rows, newAccount)) {
+      onCreateAccount(newAccount)
+    }
   }
 
   function handleConfirm() {
