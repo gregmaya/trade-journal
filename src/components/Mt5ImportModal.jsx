@@ -1,6 +1,6 @@
 // src/components/Mt5ImportModal.jsx
 import { useState, useRef } from 'react'
-import { parseMt5XlsxReport } from '../utils/parseMt5Report.js'
+import { parseMt5XlsxRows, extractAccountLogin, extractPositions } from '../utils/parseMt5Report.js'
 import { fmtDollars } from '../utils/compute.js'
 import { T, btn, Card } from '../utils/theme.jsx'
 
@@ -25,27 +25,56 @@ function classificationColor(c) {
   return c === 'win' ? T.green : c === 'loss' ? T.red : T.yellow
 }
 
-// Props: accounts (ACCOUNTS array from accounts.js — id, label fields), onImport(trades), onClose
-export function Mt5ImportModal({ accounts, onImport, onClose }) {
-  const [step, setStep] = useState('upload')
+function slugify(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+const inputStyle = { background: T.surface, color: T.text, border: `0.5px solid ${T.border}`, borderRadius: 4, padding: '6px 9px', fontFamily: 'var(--font-sans)', fontSize: 13, width: '100%' }
+
+// Props: accounts (combined ACCOUNTS + runtime-created list — id, label, login fields),
+// onImport(trades), onCreateAccount(account), onClose
+export function Mt5ImportModal({ accounts, onImport, onCreateAccount, onClose }) {
+  const [step, setStep] = useState('upload') // 'upload' | 'create-account' | 'preview'
+  const [rows, setRows] = useState(null)
+  const [login, setLogin] = useState(null)
+  const [account, setAccount] = useState(null)
   const [parsed, setParsed] = useState([])
-  const [accountId, setAccountId] = useState(accounts[0]?.id || '')
   const [drag, setDrag] = useState(false)
   const [parseErr, setParseErr] = useState('')
+  const [newAccountForm, setNewAccountForm] = useState({ label: '', propFirm: '', initialBalance: '' })
   const fileRef = useRef()
+
+  function finishParse(detectedRows, matchedAccount) {
+    const trades = extractPositions(detectedRows, matchedAccount.id)
+    if (trades.length === 0) {
+      setParseErr('No closed positions found in this report.')
+      return
+    }
+    setAccount(matchedAccount)
+    setParsed(trades)
+    setParseErr('')
+    setStep('preview')
+  }
 
   function handleFile(file) {
     const reader = new FileReader()
     reader.onload = (e) => {
       try {
-        const trades = parseMt5XlsxReport(e.target.result, accountId)
-        if (trades.length === 0) {
-          setParseErr('No closed positions found in this report.')
+        const parsedRows = parseMt5XlsxRows(e.target.result)
+        const detectedLogin = extractAccountLogin(parsedRows)
+        if (!detectedLogin) {
+          setParseErr('Couldn\'t find an Account row in this report — make sure it\'s an unmodified MT5 "Save as Report" export.')
           return
         }
-        setParsed(trades)
+        const match = accounts.find(a => a.login === detectedLogin)
+        setRows(parsedRows)
+        setLogin(detectedLogin)
         setParseErr('')
-        setStep('preview')
+        if (match) {
+          finishParse(parsedRows, match)
+        } else {
+          setStep('create-account')
+        }
       } catch (err) {
         setParseErr(err.message || 'Failed to parse file. Make sure it is an MT5 "Save as Report" .xlsx export.')
       }
@@ -54,12 +83,42 @@ export function Mt5ImportModal({ accounts, onImport, onClose }) {
     reader.readAsArrayBuffer(file)
   }
 
+  function handleCreateAccount() {
+    const initialBalance = Number(newAccountForm.initialBalance)
+    const newAccount = {
+      id: `${slugify(newAccountForm.propFirm)}-${login}`,
+      label: newAccountForm.label.trim(),
+      propFirm: newAccountForm.propFirm.trim(),
+      botName: '',
+      bots: [],
+      platform: 'mt5',
+      login,
+      currency: 'USD',
+      initialBalance,
+      maxLossPct: 0.10,
+      phase: 1,
+      phaseStartBalance: initialBalance,
+      phaseTargetPct: 0.10,
+    }
+    onCreateAccount(newAccount)
+    finishParse(rows, newAccount)
+  }
+
   function handleConfirm() {
     onImport(parsed)
   }
 
-  const canUpload = accounts.length > 0 && !!accountId
-  const selectedAccount = accounts.find(a => a.id === accountId)
+  function reset() {
+    setStep('upload')
+    setRows(null)
+    setLogin(null)
+    setAccount(null)
+    setParsed([])
+    setParseErr('')
+    setNewAccountForm({ label: '', propFirm: '', initialBalance: '' })
+  }
+
+  const canCreate = newAccountForm.label.trim() && newAccountForm.propFirm.trim() && Number(newAccountForm.initialBalance) > 0
 
   return (
     <Modal title="Import MT5 Report" onClose={onClose} width={780}
@@ -70,55 +129,73 @@ export function Mt5ImportModal({ accounts, onImport, onClose }) {
             Import {parsed.length} trade{parsed.length !== 1 ? 's' : ''}
           </button>
         )}
+        {step === 'create-account' && (
+          <button style={btn()} disabled={!canCreate} onClick={handleCreateAccount}>
+            Create account &amp; continue
+          </button>
+        )}
       </>}>
       {step === 'upload' && <>
         <div style={{ marginBottom: 14, padding: 12, background: T.surface, borderRadius: 8, fontSize: 12, lineHeight: 1.7, color: T.muted }}>
           <strong style={{ color: T.text }}>How to export from MT5:</strong><br />
           1. Open the MT5 terminal → Toolbox → History<br />
           2. Right-click → Save as Report<br />
-          3. Upload the resulting .xlsx file below
+          3. Upload the resulting .xlsx file below — the account is detected automatically from the report
         </div>
-        {accounts.length === 0 ? (
-          <div style={{ marginBottom: 14, padding: 12, background: T.redBg, borderRadius: 8, fontSize: 13, color: T.red, lineHeight: 1.6 }}>
-            <strong>No accounts found.</strong> Add an account to accounts.js before importing trades.
-          </div>
-        ) : (
-          <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ fontSize: 13, fontWeight: 500, color: T.text, whiteSpace: 'nowrap' }}>Assign to account</label>
-            <select value={accountId} onChange={e => setAccountId(e.target.value)} style={{ flex: 1 }}>
-              <option value="">— Select account —</option>
-              {accounts.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
-            </select>
-          </div>
-        )}
         {parseErr && (
           <div style={{ color: T.red, fontSize: 12, marginBottom: 12, padding: '8px 12px', background: T.redBg, borderRadius: 6 }}>
             {parseErr}
           </div>
         )}
         <div
-          style={{ border: `2px dashed ${drag ? T.green : (canUpload ? T.border2 : T.border)}`, borderRadius: 10, padding: '50px 40px', textAlign: 'center', cursor: canUpload ? 'pointer' : 'not-allowed', background: drag ? T.greenBg : 'transparent', transition: 'all 0.15s', opacity: canUpload ? 1 : 0.45 }}
-          onDragOver={e => { if (!canUpload) return; e.preventDefault(); setDrag(true) }}
+          style={{ border: `2px dashed ${drag ? T.green : T.border2}`, borderRadius: 10, padding: '50px 40px', textAlign: 'center', cursor: 'pointer', background: drag ? T.greenBg : 'transparent', transition: 'all 0.15s' }}
+          onDragOver={e => { e.preventDefault(); setDrag(true) }}
           onDragLeave={() => setDrag(false)}
-          onDrop={e => { e.preventDefault(); setDrag(false); if (!canUpload) return; const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
-          onClick={() => { if (canUpload) fileRef.current.click() }}>
+          onDrop={e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
+          onClick={() => fileRef.current.click()}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>📂</div>
           <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>Drop xlsx file here or click to browse</div>
-          <div style={{ fontSize: 12, color: T.hint }}>{canUpload ? 'MT5 "Save as Report" .xlsx export' : 'Select an account above to continue'}</div>
+          <div style={{ fontSize: 12, color: T.hint }}>MT5 "Save as Report" .xlsx export</div>
           <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={e => { const f = e.target.files[0]; if (f) handleFile(f) }} />
         </div>
+      </>}
+      {step === 'create-account' && <>
+        <div style={{ marginBottom: 14, padding: 12, background: T.surface, borderRadius: 8, fontSize: 13, color: T.text, lineHeight: 1.6 }}>
+          Account <strong>{login}</strong> isn't in your accounts list yet. Add it to continue importing.
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, color: T.hint, display: 'block', marginBottom: 4 }}>Label</label>
+            <input style={inputStyle} value={newAccountForm.label}
+              onChange={e => setNewAccountForm({ ...newAccountForm, label: e.target.value })}
+              placeholder="e.g. FundedNext 15K" />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: T.hint, display: 'block', marginBottom: 4 }}>Prop firm</label>
+            <input style={inputStyle} value={newAccountForm.propFirm}
+              onChange={e => setNewAccountForm({ ...newAccountForm, propFirm: e.target.value })}
+              placeholder="e.g. FundedNext" />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: T.hint, display: 'block', marginBottom: 4 }}>Starting balance (USD)</label>
+            <input style={inputStyle} type="number" value={newAccountForm.initialBalance}
+              onChange={e => setNewAccountForm({ ...newAccountForm, initialBalance: e.target.value })}
+              placeholder="e.g. 15000" />
+          </div>
+        </div>
+        <button style={btn('ghost')} onClick={reset}>← Back</button>
       </>}
       {step === 'preview' && <>
         <div style={{ display: 'flex', gap: 12, marginBottom: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <span style={{ fontSize: 12, color: T.muted }}>
             <strong style={{ color: T.text }}>{parsed.length}</strong> trade{parsed.length !== 1 ? 's' : ''} parsed
           </span>
-          {selectedAccount && (
+          {account && (
             <span style={{ marginLeft: 'auto', fontSize: 12, padding: '3px 10px', background: T.surface, borderRadius: 6, color: T.muted }}>
-              Account: <strong style={{ color: T.text }}>{selectedAccount.label}</strong>
+              Detected account: <strong style={{ color: T.text }}>{account.label}</strong>
             </span>
           )}
-          <button style={btn('ghost')} onClick={() => setStep('upload')}>← Back</button>
+          <button style={btn('ghost')} onClick={reset}>← Back</button>
         </div>
         <div style={{ maxHeight: 340, overflow: 'auto', border: `0.5px solid ${T.border}`, borderRadius: 8 }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
