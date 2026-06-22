@@ -84,6 +84,7 @@ export function defaultData() {
       commissions: { micro: 1.03, mini: 3.50 },
     },
     dailyBotAssignments: {},
+    mt5Accounts: [],
   };
 }
 

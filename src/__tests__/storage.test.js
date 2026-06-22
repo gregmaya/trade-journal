@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mergeTrades } from '../storage.js'
+import { mergeTrades, defaultData } from '../storage.js'
 
 describe('mergeTrades', () => {
   it('deduplicates by id', () => {
@@ -20,5 +20,11 @@ describe('mergeTrades', () => {
     expect(mergeTrades([], [])).toEqual([])
     expect(mergeTrades([{ id: 'x' }], [])).toHaveLength(1)
     expect(mergeTrades([], [{ id: 'y' }])).toHaveLength(1)
+  })
+})
+
+describe('defaultData', () => {
+  it('includes an empty mt5Accounts list for runtime-created accounts', () => {
+    expect(defaultData().mt5Accounts).toEqual([])
   })
 })
