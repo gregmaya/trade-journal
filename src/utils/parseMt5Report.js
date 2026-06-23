@@ -83,16 +83,22 @@ export function parseMt5XlsxRows(buffer) {
  * Extracts the account login number from the report's header rows (above
  * "Positions"). MT5's standard report header has a row like:
  *   Account:  26432619 (USD, FivePercentOnline-Real, demo, Hedge)
- * Returns the leading digit run from column B of that row, or null if no
- * "Account:" row exists or its value doesn't start with digits.
+ * The label lives in column A; the value's column varies by report (MT5
+ * merges header cells differently across builds/brokers — seen in column B
+ * in some reports and column D in others) so this scans the row left-to-right
+ * for the first populated cell after A. Returns the leading digit run from
+ * that cell, or null if no "Account:" row exists or no value starts with digits.
  *
  * @param {Array<Record<string,string>>} rows
  * @returns {string|null}
  */
 export function extractAccountLogin(rows) {
   const row = rows.find(r => (r.A || '').trim() === 'Account:')
-  if (!row || !row.B) return null
-  const match = String(row.B).match(/^(\d+)/)
+  if (!row) return null
+  const valueCol = Object.keys(row).filter(c => c !== 'A').sort()
+    .find(c => row[c] != null && String(row[c]).trim() !== '')
+  if (!valueCol) return null
+  const match = String(row[valueCol]).match(/^(\d+)/)
   return match ? match[1] : null
 }
 

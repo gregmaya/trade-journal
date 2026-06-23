@@ -75,6 +75,13 @@ describe('extractAccountLogin', () => {
     const rows = parseMt5XlsxRows(buffer)
     expect(extractAccountLogin(rows)).toBeNull()
   })
+
+  it('finds the value when it sits in a later column (real MT5 reports merge B/C as empty and put the value in D)', () => {
+    const rowsXml = `<row r="1">${strCell('A1', 0)}<c r="B1" s="2"/><c r="C1" s="2"/>${strCell('D1', 1)}</row>`
+    const buffer = buildReportBuffer({ rowsXml, shared: HEADER_SHARED })
+    const rows = parseMt5XlsxRows(buffer)
+    expect(extractAccountLogin(rows)).toBe('26432619')
+  })
 })
 
 describe('parseMt5XlsxReport', () => {
