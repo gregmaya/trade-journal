@@ -41,7 +41,7 @@ export function Mt5ImportModal({ accounts, onImport, onCreateAccount, onClose })
   const [parsed, setParsed] = useState([])
   const [drag, setDrag] = useState(false)
   const [parseErr, setParseErr] = useState('')
-  const [newAccountForm, setNewAccountForm] = useState({ label: '', propFirm: '', initialBalance: '' })
+  const [newAccountForm, setNewAccountForm] = useState({ label: '', propFirm: '', initialBalance: '', openedDate: '' })
   const fileRef = useRef()
 
   function finishParse(detectedRows, matchedAccount) {
@@ -100,6 +100,7 @@ export function Mt5ImportModal({ accounts, onImport, onCreateAccount, onClose })
       phase: 1,
       phaseStartBalance: initialBalance,
       phaseTargetPct: 0.10,
+      openedDate: newAccountForm.openedDate || null,
     }
     if (finishParse(rows, newAccount)) {
       onCreateAccount(newAccount)
@@ -183,6 +184,11 @@ export function Mt5ImportModal({ accounts, onImport, onCreateAccount, onClose })
             <input style={inputStyle} type="number" value={newAccountForm.initialBalance}
               onChange={e => setNewAccountForm({ ...newAccountForm, initialBalance: e.target.value })}
               placeholder="e.g. 15000" />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: T.hint, display: 'block', marginBottom: 4 }}>Opened date</label>
+            <input style={inputStyle} type="date" value={newAccountForm.openedDate}
+              onChange={e => setNewAccountForm({ ...newAccountForm, openedDate: e.target.value })} />
           </div>
         </div>
         <button style={btn('ghost')} onClick={reset}>← Back</button>

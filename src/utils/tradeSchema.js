@@ -20,7 +20,7 @@
  * @property {string[]} tags
  * @property {string}  notes
  * @property {'london'|'new_york'|'overlap'|'other'} sessionLabel
- * @property {'win'|'loss'|'be'} classification
+ * @property {'win'|'loss'} classification
  * @property {'mtconnect'|'python'|'manual'} syncSource
  * @property {string}  syncedAt       — ISO8601
  * @property {string}  strategy
@@ -29,8 +29,10 @@
  */
 
 /**
- * Returns the trading session label for a given UTC timestamp.
- * Session windows are in NY time (America/New_York):
+ * Returns the trading session label for a given trade timestamp.
+ * Timestamps are stored as the broker's recorded CET wall-clock digits
+ * (under a UTC label) and must be read back as-is — no timezone conversion.
+ * Session windows below are in that same CET wall-clock time:
  *   London:   03:00–05:00
  *   Overlap:  08:00–09:30
  *   New York: 09:30–11:30
@@ -40,16 +42,21 @@
  */
 export function labelSession(openTimeISO) {
   const d = new Date(openTimeISO)
-  const parts = new Intl.DateTimeFormat('en-US', {
-    hour: 'numeric', minute: 'numeric', hour12: false,
-    timeZone: 'America/New_York',
-  }).formatToParts(d)
-  const h = parseInt(parts.find(p => p.type === 'hour').value)
-  const m = parseInt(parts.find(p => p.type === 'minute').value)
+  const h = d.getUTCHours()
+  const m = d.getUTCMinutes()
   const total = h * 60 + m
 
   if (total >= 3 * 60 && total < 5 * 60)            return 'london'
   if (total >= 8 * 60 && total < 9 * 60 + 30)       return 'overlap'
   if (total >= 9 * 60 + 30 && total < 11 * 60 + 30) return 'new_york'
   return 'other'
+}
+
+/**
+ * Strict binary trade classification — no breakeven bucket.
+ * @param {number} pnl
+ * @returns {'win'|'loss'}
+ */
+export function classifyPnl(pnl) {
+  return pnl > 0 ? 'win' : 'loss'
 }

@@ -33,6 +33,15 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars, onSe
     accounts.map(acc => [acc.id, computeProfitPctSeries(acc, mt5Trades.filter(t => t.accountId === acc.id))])
   )
 
+  // Sort accounts by % profit, most to least
+  const sortedAccounts = [...accounts].sort((a, b) => {
+    const pnlA = mt5Trades.filter(t => t.accountId === a.id).reduce((s, t) => s + t.pnl, 0)
+    const pnlB = mt5Trades.filter(t => t.accountId === b.id).reduce((s, t) => s + t.pnl, 0)
+    const pctA = a.initialBalance ? pnlA / a.initialBalance : -Infinity
+    const pctB = b.initialBalance ? pnlB / b.initialBalance : -Infinity
+    return pctB - pctA
+  })
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {/* Combined profit % chart */}
@@ -45,11 +54,14 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars, onSe
       <div>
         <div style={{ fontSize: 13, fontWeight: 500, color: T.hint, textTransform: 'uppercase', letterSpacing: '0.6px', marginBottom: 10 }}>Account Status</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {accounts.map(acc => {
+          {sortedAccounts.map(acc => {
             const trades = mt5Trades.filter(t => t.accountId === acc.id)
             const pnl = trades.reduce((s, t) => s + t.pnl, 0)
             const balance = acc.initialBalance + pnl
             const stats = computeStats(trades)
+            const lastTrade = trades.length
+              ? trades.reduce((a, b) => (a.closeTime > b.closeTime ? a : b))
+              : null
 
             // Static drawdown floor — fixed % of initialBalance, never moves with peak balance
             const floor = acc.initialBalance * (1 - acc.maxLossPct)
@@ -60,7 +72,16 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars, onSe
             // Phase target — measured from the current phase's own starting balance
             const gainedSincePhaseStart = balance - acc.phaseStartBalance
             const targetGap = acc.phaseStartBalance * acc.phaseTargetPct
+            const targetBalance = acc.phaseStartBalance + targetGap
             const targetProgress = targetGap > 0 ? Math.min(Math.max(gainedSincePhaseStart / targetGap, 0), 1) : 0
+
+            // Single gauge bar: center = initialBalance, left edge = floor, right edge = targetBalance
+            const profitFillPct = balance > acc.initialBalance && targetBalance > acc.initialBalance
+              ? Math.min((balance - acc.initialBalance) / (targetBalance - acc.initialBalance), 1) * 50
+              : 0
+            const drawdownFillPct = balance < acc.initialBalance && acc.initialBalance > floor
+              ? Math.min((acc.initialBalance - balance) / (acc.initialBalance - floor), 1) * 50
+              : 0
 
             const status = gainedSincePhaseStart >= targetGap ? 'passed'
               : ddPct >= 1 ? 'blown'
@@ -79,6 +100,7 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars, onSe
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 500, color: T.text }}>{acc.label}</div>
+                    <div style={{ fontSize: 11, color: T.hint }}>#{acc.login}</div>
                     <div style={{ fontSize: 11, color: T.hint }}>{acc.propFirm} · {acc.botName}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -94,25 +116,22 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars, onSe
                   </div>
                 </div>
 
-                {/* Profit target progress */}
-                <div style={{ marginBottom: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: T.hint, marginBottom: 3 }}>
-                    <span>Profit target</span>
-                    <span>{fmtDollars(gainedSincePhaseStart)} / {fmtDollars(targetGap)}</span>
-                  </div>
-                  <div style={{ height: 5, background: T.border, borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${targetProgress * 100}%`, background: T.green, borderRadius: 3, transition: 'width 0.3s' }} />
-                  </div>
-                </div>
-
-                {/* Drawdown usage */}
+                {/* Combined gauge: floor — initialBalance (center) — target */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: T.hint, marginBottom: 3 }}>
-                    <span>Drawdown used</span>
-                    <span>{fmtDollars(ddUsed)} / {fmtDollars(maxLossAmount)}</span>
+                    <span>{fmtDollars(floor)}</span>
+                    <span>{fmtDollars(acc.initialBalance)}</span>
+                    <span>{fmtDollars(targetBalance)}</span>
                   </div>
-                  <div style={{ height: 5, background: T.border, borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${Math.min(ddPct * 100, 100)}%`, background: ddPct >= 0.7 ? T.red : T.yellow, borderRadius: 3, transition: 'width 0.3s' }} />
+                  <div style={{ position: 'relative', height: 5, background: T.border, borderRadius: 3, overflow: 'hidden' }}>
+                    {/* center marker */}
+                    <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: 1, background: T.hint }} />
+                    {profitFillPct > 0 && (
+                      <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: `${profitFillPct}%`, background: T.green, transition: 'width 0.3s' }} />
+                    )}
+                    {drawdownFillPct > 0 && (
+                      <div style={{ position: 'absolute', right: '50%', top: 0, bottom: 0, width: `${drawdownFillPct}%`, background: ddPct >= 0.7 ? T.red : T.yellow, transition: 'width 0.3s' }} />
+                    )}
                   </div>
                 </div>
 
@@ -124,7 +143,7 @@ export function CrossAccountDashboard({ accounts, allTrades, T, fmtDollars, onSe
                 </div>
 
                 <div style={{ fontSize: 11, color: T.hint, marginTop: 8 }}>
-                  {trades.length} trades · Balance: {fmtDollars(balance)}
+                  {trades.length} trades · Balance: {fmtDollars(balance)} · Last trade: {lastTrade ? lastTrade.closeTime.slice(0, 10) : 'No trades yet'}
                 </div>
               </div>
             )

@@ -1,4 +1,4 @@
-import { labelSession } from './tradeSchema.js'
+import { labelSession, classifyPnl } from './tradeSchema.js'
 
 /**
  * Maps one closed trade record from mtconnectapi.com to the normalised Trade schema.
@@ -7,10 +7,9 @@ import { labelSession } from './tradeSchema.js'
  *
  * @param {Object} raw
  * @param {string} accountId
- * @param {number} [beThresholdUsd=50]
  * @returns {import('./tradeSchema.js').Trade}
  */
-export function mapMtConnectTrade(raw, accountId, beThresholdUsd = 50) {
+export function mapMtConnectTrade(raw, accountId) {
   const openTime  = parseApiTime(raw.OpenTime  ?? raw.open_time  ?? raw.TimeSetup ?? raw.time_setup)
   const closeTime = parseApiTime(raw.CloseTime ?? raw.close_time ?? raw.Time      ?? raw.time)
   // MT5 deal type: 0 = BUY_DEAL, 1 = SELL_DEAL
@@ -40,18 +39,13 @@ export function mapMtConnectTrade(raw, accountId, beThresholdUsd = 50) {
     tags:         [],
     notes:        '',
     sessionLabel: labelSession(openTime),
-    classification: classifyPnl(pnl, beThresholdUsd),
+    classification: classifyPnl(pnl),
     syncSource:   'mtconnect',
     syncedAt:     new Date().toISOString(),
     strategy:     '',
     tradingViewUrl: '',
     rating:       null,
   }
-}
-
-function classifyPnl(pnl, threshold) {
-  if (Math.abs(pnl) <= threshold) return 'be'
-  return pnl > 0 ? 'win' : 'loss'
 }
 
 /**

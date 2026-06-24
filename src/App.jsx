@@ -1,31 +1,17 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from "recharts";
-import { fsaSupported, hasHandle, openFile, createFile, readData, writeData, readLocalStorage, defaultData, mergeTrades } from "./storage.js";
-import { parseTradovateCSV, convertToNY } from "./utils/tradovate.js";
-import { fmtDollars, fmtTicks, fmtR as fmtRUtil, computeR } from "./utils/compute.js";
-import { AccountCard } from "./components/AccountCard.jsx";
-import { TradeLog } from "./components/TradeLog.jsx";
+import { useState, useEffect, useCallback, useRef } from "react";
+import { fsaSupported, openFile, createFile, readData, writeData, readLocalStorage, defaultData, mergeTrades } from "./storage.js";
+import { fmtDollars } from "./utils/compute.js";
 import { Mt5ImportModal } from "./components/Mt5ImportModal.jsx";
 import { Mt5AccountAnalytics } from "./components/Mt5AccountAnalytics.jsx";
+import { BotsPage } from "./components/BotsPage.jsx";
+import { AccountsPage } from "./components/AccountsPage.jsx";
 import { T, btn, Card } from "./utils/theme.jsx";
-import { getOutcome, entryTimestamp, exitTimestamp, fmtTicksInt } from "./utils/tradeHelpers.js";
 import { CrossAccountDashboard } from './components/CrossAccountDashboard.jsx';
 import { ACCOUNTS } from './accounts.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
 
-const DIRECTIONS = ["Long","Short"];
-
-function fmtR(n) { return fmtRUtil(n); }
-
-// Direction-aware fill helpers (local aliases)
-function entryPrice(fill) {
-  return fill.direction === "Short" ? fill.avgSellPrice : fill.buyPrice;
-}
-function avgExitPrice(fill) {
-  return fill.direction === "Short" ? fill.buyPrice : fill.avgSellPrice;
-}
 const CardHead = ({title, action}) => (
   <div style={{padding:"10px 14px", borderBottom:`0.5px solid ${T.border}`, display:"flex", justifyContent:"space-between", alignItems:"center"}}>
     <span style={{fontSize:11, fontWeight:500, color:T.hint, textTransform:"uppercase", letterSpacing:"0.8px"}}>{title}</span>
@@ -33,794 +19,47 @@ const CardHead = ({title, action}) => (
   </div>
 );
 
-function Tag({s}) {
-  const colors = {ORB:[T.green,T.greenBg], ILM:[T.indigo,T.indigoBg], "IMPULSE TRADE":[T.yellow,T.yellowBg], None:[T.hint,"transparent"]};
-  const [color,bg] = colors[s]||[T.hint,"transparent"];
-  return <span style={{fontSize:10, fontWeight:500, padding:"2px 7px", borderRadius:4, background:bg, color, border:`0.5px solid ${color}40`}}>{s}</span>;
-}
-function Stars({value=0, onChange}) {
-  const [h,setH]=useState(0);
-  return <div style={{display:"flex",gap:2}}>{[1,2,3,4,5].map(i=>(
-    <span key={i} style={{cursor:onChange?"pointer":"default",color:(h||value)>=i?T.yellow:T.hint,fontSize:14}}
-      onMouseEnter={()=>onChange&&setH(i)} onMouseLeave={()=>onChange&&setH(0)}
-      onClick={()=>onChange&&onChange(i)}>★</span>
-  ))}</div>;
-}
-function Input({label, ...props}) {
-  return <div style={{display:"flex",flexDirection:"column",gap:4}}>
-    {label&&<label style={{fontSize:11,color:T.hint}}>{label}</label>}
-    <input style={{width:"100%"}} {...props}/>
-  </div>;
-}
-function Select({label, children, ...props}) {
-  return <div style={{display:"flex",flexDirection:"column",gap:4}}>
-    {label&&<label style={{fontSize:11,color:T.hint}}>{label}</label>}
-    <select style={{width:"100%"}} {...props}>{children}</select>
-  </div>;
-}
-
-function LBL({children}) {
-  return <label style={{fontSize:11,color:T.hint,marginBottom:4,display:"block"}}>{children}</label>;
-}
-function Field({label, children}) {
-  return <div style={{display:"flex",flexDirection:"column",gap:2}}><LBL>{label}</LBL>{children}</div>;
-}
-function TH({children,style={}}) {
-  return <th style={{textAlign:"left",padding:"7px 10px",borderBottom:`0.5px solid ${T.border}`,color:T.hint,fontWeight:500,fontSize:10,textTransform:"uppercase",letterSpacing:"0.6px",whiteSpace:"nowrap",...style}}>{children}</th>;
-}
-function TD({children,style={}}) {
-  return <td style={{padding:"7px 10px",borderBottom:`0.5px solid ${T.border}`,fontSize:12,...style}}>{children}</td>;
-}
-
-// ── Modal wrapper ─────────────────────────────────────────────────────────────
-function Modal({title, onClose, children, footer, width=620}) {
-  return (
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{background:T.card,border:`0.5px solid ${T.border2}`,borderRadius:"var(--border-radius-lg)",width:"100%",maxWidth:width,maxHeight:"90vh",overflow:"auto"}}>
-        <div style={{padding:"14px 18px",borderBottom:`0.5px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:15,fontWeight:500}}>{title}</span>
-          <button onClick={onClose} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,lineHeight:1,color:T.hint}}>×</button>
-        </div>
-        <div style={{padding:"18px"}}>{children}</div>
-        {footer && <div style={{padding:"12px 18px",borderTop:`0.5px solid ${T.border}`,display:"flex",gap:8,justifyContent:"flex-end"}}>{footer}</div>}
-      </div>
-    </div>
-  );
-}
-
-// ── Trade Detail Panel ────────────────────────────────────────────────────────
-function TradeDetailPanel({ trade, strategies, tags, settings, onSave, onClose }) {
-  const { fill = {}, journal = {} } = trade || {};
-
-  function fmtDuration(sec) {
-    if (sec == null) return "—";
-    const abs = Math.abs(sec);
-    const m = Math.floor(abs / 60);
-    const s = abs % 60;
-    return m > 0 ? `${m}m ${s}s` : `${s}s`;
-  }
-
-  function timeOnly(ts) {
-    if (!ts) return "—";
-    // ISO: "YYYY-MM-DDTHH:mm:ss" or "YYYY-MM-DD HH:mm:ss"
-    const sep = ts.includes("T") ? "T" : " ";
-    const parts = ts.split(sep);
-    if (parts.length < 2) return "—";
-    return parts[1].slice(0, 8);
-  }
-
-  const outcomeColor = (oc) =>
-    oc === "win" ? T.green : oc === "loss" ? T.red : T.yellow;
-  const oc = getOutcome(trade, settings);
-  const pnlColor = outcomeColor(oc);
-
-  const [tagInput, setTagInput] = useState("");
-
-  function updateJournal(updates) {
-    const updated = { ...trade, journal: { ...journal, ...updates } };
-    onSave(updated);
-  }
-
-  function handleRiskChange(e) {
-    const raw = e.target.value;
-    const riskTicks = raw === "" ? null : parseFloat(raw);
-    const rCollected = computeR(fill.netPnlTicks, riskTicks);
-    updateJournal({ riskTicks: riskTicks ?? null, rCollected });
-  }
-
-  function addTag(tag) {
-    const t = tag.trim();
-    if (!t) return;
-    const current = journal.tags || [];
-    if (current.includes(t)) return;
-    updateJournal({ tags: [...current, t] });
-    setTagInput("");
-  }
-
-  function removeTag(tag) {
-    updateJournal({ tags: (journal.tags || []).filter(x => x !== tag) });
-  }
-
-  const date = entryTimestamp(fill) ? entryTimestamp(fill).slice(0, 10) : "—";
-  const symbol = fill.symbol || "—";
-  const direction = fill.direction || "—";
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div
-        onClick={onClose}
-        style={{
-          position: "fixed", inset: 0,
-          background: "rgba(0,0,0,0.35)",
-          zIndex: 199,
-        }}
-      />
-      {/* Panel */}
-      <div style={{
-        position: "fixed", right: 0, top: 0,
-        height: "100vh", width: 440,
-        background: T.card,
-        borderLeft: `0.5px solid ${T.border2}`,
-        zIndex: 200,
-        display: "flex", flexDirection: "column",
-        boxShadow: "-8px 0 32px rgba(0,0,0,0.18)",
-      }}>
-        {/* Header */}
-        <div style={{
-          padding: "14px 18px",
-          borderBottom: `0.5px solid ${T.border}`,
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          flexShrink: 0,
-        }}>
-          <span style={{ fontSize: 13, fontWeight: 500 }}>
-            {date} — {symbol} — {direction}
-          </span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, lineHeight: 1, color: T.hint }}>×</button>
-        </div>
-
-        {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "18px" }}>
-
-          {/* Fill section */}
-          <div style={{ fontSize: 11, fontWeight: 500, color: T.hint, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 10 }}>Fill</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
-            {/* Direction */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Direction</div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: fill.direction === "Long" ? T.green : T.red }}>
-                {fill.direction === "Long" ? "▲ Long" : fill.direction === "Short" ? "▼ Short" : "—"}
-              </div>
-            </div>
-            {/* Symbol */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Symbol</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{fill.symbol || "—"}</div>
-            </div>
-            {/* Qty */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Qty</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{fill.qty ?? "—"}</div>
-            </div>
-            {/* Entry price */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Entry price</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{entryPrice(fill) ?? "—"}</div>
-            </div>
-            {/* Avg exit */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Avg exit</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{avgExitPrice(fill) ?? "—"}</div>
-            </div>
-            {/* Gross P&L */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Gross P&L</div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: fill.grossPnlDollars >= 0 ? T.green : T.red }}>
-                {fmtDollars(fill.grossPnlDollars)}
-              </div>
-            </div>
-            {/* Commission */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Commission</div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: T.red }}>{fmtDollars(fill.commissionTotal)}</div>
-            </div>
-            {/* Net P&L */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Net P&L</div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: pnlColor }}>{fmtDollars(fill.netPnlDollars)}</div>
-            </div>
-            {/* Net Ticks */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Net Ticks</div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: pnlColor }}>{fmtTicks(fill.netPnlTicks)}</div>
-            </div>
-            {/* Duration */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Duration</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{fmtDuration(fill.durationSec)}</div>
-            </div>
-            {/* Entry time */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Entry time (NY)</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{timeOnly(entryTimestamp(fill))}</div>
-            </div>
-            {/* Exit time */}
-            <div style={{ background: T.surface, borderRadius: 7, padding: "8px 12px" }}>
-              <div style={{ fontSize: 10, color: T.hint, marginBottom: 3 }}>Exit time (NY)</div>
-              <div style={{ fontSize: 13, fontWeight: 500 }}>{timeOnly(exitTimestamp(fill))}</div>
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div style={{ borderTop: `0.5px solid ${T.border}`, marginBottom: 20 }} />
-
-          {/* Journal section */}
-          <div style={{ fontSize: 11, fontWeight: 500, color: T.hint, textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 14 }}>Journal</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-            {/* Risk ticks + R collected row */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <Field label="Risk (ticks)">
-                <input
-                  type="number"
-                  step="1"
-                  min="0"
-                  placeholder="e.g. 8"
-                  value={journal.riskTicks ?? ""}
-                  onChange={handleRiskChange}
-                  style={{ width: "100%" }}
-                />
-              </Field>
-              <Field label="R collected">
-                <div style={{ padding: "6px 10px", background: T.surface, borderRadius: 6, fontSize: 13, fontWeight: 500, color: journal.rCollected != null ? (journal.rCollected > 0.05 ? T.green : journal.rCollected < -0.05 ? T.red : T.yellow) : T.hint }}>
-                  {fmtR(journal.rCollected)}
-                </div>
-              </Field>
-            </div>
-
-            {/* Strategy */}
-            <Field label="Strategy">
-              <select
-                value={journal.strategy || ""}
-                onChange={e => updateJournal({ strategy: e.target.value || null })}
-                style={{ width: "100%" }}
-              >
-                <option value="">— None —</option>
-                {strategies.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </Field>
-
-            {/* Tags */}
-            <Field label="Tags">
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
-                {(journal.tags || []).map(t => (
-                  <span key={t} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, padding: "2px 8px", borderRadius: 4, background: T.indigoBg, color: T.indigo, border: `0.5px solid ${T.indigo}40` }}>
-                    {t}
-                    <button onClick={() => removeTag(t)} style={{ background: "none", border: "none", cursor: "pointer", color: T.hint, fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
-                  </span>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <input
-                  list="tag-suggestions"
-                  value={tagInput}
-                  onChange={e => setTagInput(e.target.value)}
-                  onKeyDown={e => { if (e.key === "Enter") { addTag(tagInput); e.preventDefault(); } }}
-                  placeholder="Add tag..."
-                  style={{ flex: 1 }}
-                />
-                <datalist id="tag-suggestions">
-                  {tags.filter(t => !(journal.tags || []).includes(t)).map(t => <option key={t} value={t} />)}
-                </datalist>
-                <button style={btn("ghost")} onClick={() => addTag(tagInput)}>Add</button>
-              </div>
-            </Field>
-
-            {/* Notes */}
-            <Field label="Notes">
-              <textarea
-                style={{ width: "100%", minHeight: 80, resize: "vertical" }}
-                value={journal.notes || ""}
-                onChange={e => updateJournal({ notes: e.target.value })}
-                placeholder="Trade notes, observations..."
-              />
-            </Field>
-
-            {/* TradingView URL */}
-            <Field label="TradingView URL">
-              <input
-                value={journal.tradingViewUrl || ""}
-                onChange={e => updateJournal({ tradingViewUrl: e.target.value })}
-                placeholder="https://www.tradingview.com/x/..."
-                style={{ width: "100%" }}
-              />
-              {journal.tradingViewUrl && (
-                <a href={journal.tradingViewUrl} target="_blank" rel="noreferrer" style={{ color: T.green, fontSize: 12, textDecoration: "none", marginTop: 4, display: "inline-block" }}>
-                  View chart ↗
-                </a>
-              )}
-            </Field>
-
-            {/* Rating */}
-            <Field label="Rating">
-              <Stars value={journal.rating || 0} onChange={v => updateJournal({ rating: v })} />
-            </Field>
-
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ── Account Form ──────────────────────────────────────────────────────────────
-const ACCT_DEFAULTS = { id:"", name:"", firmId:"", type:"eval", broker:"Tradovate", firm:"Apex", startingBalance:50000, drawdownBuffer:2000, lockLevel:null, profitTarget:3000 };
-
-function AccountForm({acct, onSave, onClose}) {
-  const [f,setF]=useState({...ACCT_DEFAULTS,...(acct||{})});
-  const s=(k,v)=>setF(p=>({...p,[k]:v}));
-  function handleSave() {
-    const lockRaw = f.lockLevel;
-    const lockNum = lockRaw === "" || lockRaw === null || lockRaw === undefined ? null : +lockRaw;
-    onSave({
-      ...f,
-      id: f.id || uid(),
-      startingBalance: +f.startingBalance,
-      drawdownBuffer: +f.drawdownBuffer,
-      lockLevel: lockNum === 0 ? null : lockNum,
-      profitTarget: +f.profitTarget || 3000,
-    });
-  }
-  return (
-    <Modal title={f.id?"Edit account":"Add account"} onClose={onClose}
-      footer={<><button style={btn("ghost")} onClick={onClose}>Cancel</button><button style={btn()} onClick={handleSave}>Save</button></>}>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        <Input label="Name" value={f.name} onChange={e=>s("name",e.target.value)} placeholder="e.g. My Apex Eval"/>
-        <Input label="Firm ID" value={f.firmId} onChange={e=>s("firmId",e.target.value)} placeholder="e.g. APEX-526978-06"/>
-        <Input label="Firm" value={f.firm} onChange={e=>s("firm",e.target.value)} placeholder="e.g. Apex"/>
-        <Input label="Broker" value={f.broker} onChange={e=>s("broker",e.target.value)} placeholder="e.g. Tradovate"/>
-        <Select label="Type" value={f.type} onChange={e=>s("type",e.target.value)}>
-          <option value="eval">Eval</option>
-          <option value="pa">PA</option>
-          <option value="personal">Personal</option>
-        </Select>
-        <Input label="Starting balance ($)" type="number" value={f.startingBalance} onChange={e=>s("startingBalance",e.target.value)}/>
-        <Input label="Trailing drawdown buffer ($)" type="number" value={f.drawdownBuffer} onChange={e=>s("drawdownBuffer",e.target.value)}/>
-        <Input label="DD lock level ($) — leave blank for eval (no lock)" type="number" value={f.lockLevel ?? ""} onChange={e=>s("lockLevel",e.target.value===""?null:e.target.value)} placeholder="e.g. 50100"/>
-        <Input label="Profit target ($)" type="number" value={f.profitTarget ?? 3000} onChange={e=>s("profitTarget",e.target.value)} placeholder="e.g. 3000"/>
-      </div>
-    </Modal>
-  );
-}
-
-// ── Tradovate Import Modal ────────────────────────────────────────────────────
-function TradovateImportModal({ accounts, settings, existingBuyFillIds, existingJournalMap, onImport, onClose }) {
-  const [step, setStep] = useState("upload");
-  const [parsed, setParsed] = useState([]);
-  const [skipped, setSkipped] = useState(0);
-  const [errors, setErrors] = useState([]);
-  const [acctId, setAcctId] = useState(accounts[0]?.id || "");
-  const [drag, setDrag] = useState(false);
-  const [parseErr, setParseErr] = useState("");
-  const fileRef = useRef();
-
-  function handleFile(file) {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = parseTradovateCSV(
-        e.target.result,
-        existingBuyFillIds || [],
-        settings.commissions,
-        settings.beThresholdUsd ?? 50,
-        settings.sourceTimezone ?? "Europe/Berlin",
-        existingJournalMap
-      );
-      if (result.errors.length > 0 && result.trades.length === 0) {
-        setParseErr(result.errors[0]);
-        return;
-      }
-      setParsed(result.trades);
-      setSkipped(result.skipped);
-      setErrors(result.errors);
-      setParseErr("");
-      setStep("preview");
-    };
-    reader.onerror = () => setParseErr("Failed to read file.");
-    reader.readAsText(file);
-  }
-
-  function fmtDuration(sec) {
-    if (sec == null) return "—";
-    const abs = Math.abs(sec);
-    const m = Math.floor(abs / 60);
-    const s = abs % 60;
-    return m > 0 ? `${m}m ${s}s` : `${s}s`;
-  }
-
-  function outcomeColor(outcome) {
-    return outcome === "win" ? T.green : outcome === "loss" ? T.red : T.yellow;
-  }
-
-  function handleConfirm() {
-    const withAccount = parsed.map(t => ({
-      ...t,
-      journal: { ...t.journal, accountId: acctId },
-    }));
-    onImport(withAccount);
-  }
-
-  const canUpload = accounts.length > 0 && !!acctId;
-  const canConfirm = parsed.length > 0 && !!acctId;
-  const selectedAccount = accounts.find(a => a.id === acctId);
-
-  return (
-    <Modal title="Import Tradovate CSV" onClose={onClose} width={780}
-      footer={<>
-        <button style={btn("ghost")} onClick={onClose}>Cancel</button>
-        {step === "preview" && (() => {
-          const updatedCount = parsed.filter(t => t.fill?._updated).length;
-          const newCount = parsed.length - updatedCount;
-          const label = [
-            newCount > 0 && `${newCount} new`,
-            updatedCount > 0 && `${updatedCount} updated`,
-          ].filter(Boolean).join(" + ") || "0";
-          return (
-            <button style={btn()} disabled={!canConfirm} onClick={handleConfirm}>
-              Import {label}
-            </button>
-          );
-        })()}
-      </>}>
-      {step === "upload" && <>
-        <div style={{marginBottom:14,padding:12,background:T.surface,borderRadius:8,fontSize:12,lineHeight:1.7,color:T.muted}}>
-          <strong style={{color:T.text}}>How to export from Tradovate:</strong><br/>
-          1. Log in to Tradovate → Performance tab<br/>
-          2. Set your date range, then click Export → CSV<br/>
-          3. Upload the file below
-        </div>
-        {accounts.length === 0 ? (
-          <div style={{marginBottom:14,padding:12,background:T.redBg,borderRadius:8,fontSize:13,color:T.red,lineHeight:1.6}}>
-            <strong>No accounts found.</strong> Create an account first before importing trades.
-          </div>
-        ) : (
-          <div style={{marginBottom:14,display:"flex",alignItems:"center",gap:10}}>
-            <label style={{fontSize:13,fontWeight:500,color:T.text,whiteSpace:"nowrap"}}>Assign to account</label>
-            <Select value={acctId} onChange={e=>setAcctId(e.target.value)} style={{flex:1}}>
-              <option value="">— Select account —</option>
-              {accounts.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-            </Select>
-          </div>
-        )}
-        {parseErr && (
-          <div style={{color:T.red,fontSize:12,marginBottom:12,padding:"8px 12px",background:T.redBg,borderRadius:6}}>
-            {parseErr}
-          </div>
-        )}
-        <div
-          style={{border:`2px dashed ${drag?T.green:(canUpload?T.border2:T.border)}`,borderRadius:10,padding:"50px 40px",textAlign:"center",cursor:canUpload?"pointer":"not-allowed",background:drag?T.greenBg:"transparent",transition:"all 0.15s",opacity:canUpload?1:0.45}}
-          onDragOver={e=>{if(!canUpload)return;e.preventDefault();setDrag(true);}}
-          onDragLeave={()=>setDrag(false)}
-          onDrop={e=>{e.preventDefault();setDrag(false);if(!canUpload)return;const f=e.dataTransfer.files[0];if(f)handleFile(f);}}
-          onClick={()=>{if(canUpload)fileRef.current.click();}}>
-          <div style={{fontSize:32,marginBottom:10}}>📂</div>
-          <div style={{fontSize:14,fontWeight:500,marginBottom:4}}>Drop CSV file here or click to browse</div>
-          <div style={{fontSize:12,color:T.hint}}>{canUpload?"Export from Tradovate as .csv":"Select an account above to continue"}</div>
-          <input ref={fileRef} type="file" accept=".csv" style={{display:"none"}} onChange={e=>{const f=e.target.files[0];if(f)handleFile(f);}}/>
-        </div>
-      </>}
-      {step === "preview" && <>
-        {(() => {
-          const updatedCount = parsed.filter(t => t.fill?._updated).length;
-          const newCount = parsed.length - updatedCount;
-          return (
-            <div style={{display:"flex",gap:12,marginBottom:10,flexWrap:"wrap",alignItems:"center"}}>
-              {newCount > 0 && (
-                <span style={{fontSize:12,color:T.muted}}>
-                  <strong style={{color:T.text}}>{newCount}</strong> new trade{newCount!==1?"s":""}
-                </span>
-              )}
-              {updatedCount > 0 && (
-                <span style={{fontSize:12,color:T.blue??T.text}}>
-                  <strong>{updatedCount}</strong> updated (journal preserved)
-                </span>
-              )}
-              {skipped > 0 && (
-                <span style={{fontSize:12,color:T.yellow}}>
-                  <strong>{skipped}</strong> skipped
-                </span>
-              )}
-              {selectedAccount && (
-                <span style={{marginLeft:"auto",fontSize:12,padding:"3px 10px",background:T.surface,borderRadius:6,color:T.muted}}>
-                  Account: <strong style={{color:T.text}}>{selectedAccount.name}</strong>
-                </span>
-              )}
-              <button style={btn("ghost")} onClick={()=>setStep("upload")}>← Back</button>
-            </div>
-          );
-        })()}
-        {errors.length > 0 && (
-          <div style={{color:T.red,fontSize:11,marginBottom:10,padding:"8px 12px",background:T.redBg,borderRadius:6,lineHeight:1.7}}>
-            {errors.map((e,i)=><div key={i}>{e}</div>)}
-          </div>
-        )}
-        <div style={{maxHeight:340,overflow:"auto",border:`0.5px solid ${T.border}`,borderRadius:8}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-            <thead>
-              <tr>
-                {["Date","Symbol","Dir","Qty","Gross P&L","Net P&L","Ticks","Duration"].map(h=>(
-                  <th key={h} style={{textAlign:"left",padding:"7px 10px",borderBottom:`0.5px solid ${T.border}`,color:T.hint,fontWeight:500,fontSize:10,textTransform:"uppercase",letterSpacing:"0.6px",whiteSpace:"nowrap",position:"sticky",top:0,background:T.card}}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {parsed.slice(0,100).map((t,i)=>{
-                const f = t.fill;
-                const oc = outcomeColor(f.outcome);
-                return (
-                  <tr key={i} style={{borderBottom:`0.5px solid ${T.border}`}}>
-                    <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}>{f.boughtTimestamp?.slice(0,10)||"—"}</td>
-                    <td style={{padding:"6px 10px",fontWeight:500}}>{f.symbol}</td>
-                    <td style={{padding:"6px 10px",color:f.direction==="Long"?T.green:T.red,fontWeight:500}}>{f.direction==="Long"?"▲ Long":"▼ Short"}</td>
-                    <td style={{padding:"6px 10px",color:T.muted}}>{f.qty}</td>
-                    <td style={{padding:"6px 10px",color:f.grossPnlDollars>=0?T.green:T.red}}>{fmtDollars(f.grossPnlDollars)}</td>
-                    <td style={{padding:"6px 10px",color:oc,fontWeight:500}}>{fmtDollars(f.netPnlDollars)}</td>
-                    <td style={{padding:"6px 10px",color:oc}}>{fmtTicks(f.netPnlTicks)}</td>
-                    <td style={{padding:"6px 10px",color:T.muted}}>{fmtDuration(f.durationSec)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {parsed.length > 100 && (
-          <div style={{fontSize:11,color:T.hint,marginTop:6}}>Showing first 100 of {parsed.length}</div>
-        )}
-      </>}
-    </Modal>
-  );
-}
-
 // ── Dashboard ─────────────────────────────────────────────────────────────────
-// MT5 account deep-dive — renders Mt5AccountAnalytics for each selected account
-// (or all accounts when none are selected). Reached by clicking an Overview card.
-function Dashboard({selectedIds, accounts, mt5Trades, fmtDollars, dailyBotAssignments, onAssignBots}) {
-  const visibleAccounts = selectedIds.length===0 ? accounts : accounts.filter(a=>selectedIds.includes(a.id));
+// MT5 account deep-dive — single-select, renders Mt5AccountAnalytics for the
+// chosen account. Reached by clicking an Overview card or the account picker.
+function Dashboard({selectedId, accounts, mt5Trades, fmtDollars, dailyBotAssignments, onAssignBots, onBulkAssignBots, bots}) {
+  const fallback = accounts.find(a => !a.deprecated) || accounts[0];
+  const acc = accounts.find(a => a.id === selectedId) || fallback;
 
-  if (visibleAccounts.length===0) {
+  if (!acc) {
     return <div style={{padding:40,textAlign:"center",color:T.hint,fontSize:13}}>No accounts yet — import an MT5 report to create one.</div>;
   }
 
   return (
-    <div style={{display:"flex",flexDirection:"column",gap:32}}>
-      {visibleAccounts.map(acc=>(
-        <Mt5AccountAnalytics
-          key={acc.id}
-          account={acc}
-          trades={mt5Trades.filter(t=>t.accountId===acc.id)}
-          T={T}
-          fmtDollars={fmtDollars}
-          dailyBotAssignments={dailyBotAssignments[acc.id]||{}}
-          onAssignBots={(date,bots)=>onAssignBots(acc.id,date,bots)}
-        />
-      ))}
-    </div>
-  );
-}
-
-// ── Analytics ─────────────────────────────────────────────────────────────────
-function Analytics({trades, strategies=[], settings={}}) {
-  const [dim,setDim]=useState("strategy");
-  const total=trades.length;
-
-  // Summary metrics using netPnlDollars
-  const wTrades=trades.filter(t=>getOutcome(t,settings)==="win");
-  const lTrades=trades.filter(t=>getOutcome(t,settings)==="loss");
-  const beTrades=trades.filter(t=>getOutcome(t,settings)==="be");
-  const wins=wTrades.length;
-  const losses=lTrades.length;
-  const bes=beTrades.length;
-  const netDollars=trades.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
-  const netTicks=trades.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0);
-  const avgWin=wins?wTrades.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0)/wins:null;
-  const avgLoss=losses?lTrades.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0)/losses:null;
-  const allPnls=trades.map(t=>t.fill?.netPnlDollars||0);
-  const bestTrade=total?Math.max(...allPnls):null;
-  const worstTrade=total?Math.min(...allPnls):null;
-  let maxWS=0,maxLS=0,curS=0;
-  [...trades].sort((a,b)=>{
-    const da=a.fill?.boughtTimestamp||"";
-    const db=b.fill?.boughtTimestamp||"";
-    return da>db?1:-1;
-  }).forEach(t=>{
-    const oc=getOutcome(t,settings);
-    if(oc==="win"){curS=curS>0?curS+1:1;maxWS=Math.max(maxWS,curS);}
-    else if(oc==="loss"){curS=curS<0?curS-1:-1;maxLS=Math.max(maxLS,-curS);}
-    else curS=0;
-  });
-
-  // Grouping helpers
-  function grpByField(accessor, labels) {
-    return labels.map(l=>{
-      const g=trades.filter(t=>accessor(t)===l);
-      const w=g.filter(t=>getOutcome(t,settings)==="win").length;
-      const lo=g.filter(t=>getOutcome(t,settings)==="loss").length;
-      const be=g.filter(t=>getOutcome(t,settings)==="be").length;
-      const nd=g.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
-      const nt=g.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0);
-      return {name:l,count:g.length,wins:w,losses:lo,bes:be,winPct:g.length?w/g.length*100:0,netDollars:nd,netTicks:nt};
-    }).filter(x=>x.count>0);
-  }
-
-  const DOW=["Mon","Tue","Wed","Thu","Fri"];
-  const dowData=DOW.map(day=>{
-    const g=trades.filter(t=>{
-      try{const d=new Date(t.fill?.boughtTimestamp||"");const m={1:"Mon",2:"Tue",3:"Wed",4:"Thu",5:"Fri"};return m[d.getDay()]===day;}
-      catch{return false;}
-    });
-    const w=g.filter(t=>getOutcome(t,settings)==="win").length;
-    const lo=g.filter(t=>getOutcome(t,settings)==="loss").length;
-    const be=g.filter(t=>getOutcome(t,settings)==="be").length;
-    const nd=g.reduce((s,t)=>s+(t.fill?.netPnlDollars||0),0);
-    const nt=g.reduce((s,t)=>s+(t.fill?.netPnlTicks||0),0);
-    return {name:day,count:g.length,wins:w,losses:lo,bes:be,winPct:g.length?w/g.length*100:0,netDollars:nd,netTicks:nt};
-  }).filter(x=>x.count>0);
-
-  // Unique symbols from data
-  const symbols=[...new Set(trades.map(t=>t.fill?.symbol).filter(Boolean))].sort();
-
-  const chartData={
-    strategy:grpByField(t=>t.journal?.strategy,strategies),
-    direction:grpByField(t=>t.fill?.direction,["Long","Short"]),
-    symbol:grpByField(t=>t.fill?.symbol,symbols),
-    dow:dowData,
-  };
-  const data=chartData[dim]||[];
-
-  const Metric=({label,value,color=T.text})=>(
-    <div style={{background:T.surface,borderRadius:"var(--border-radius-md)",padding:"10px 12px"}}>
-      <div style={{fontSize:10,color:T.hint,marginBottom:3}}>{label}</div>
-      <div style={{fontSize:18,fontWeight:500,color}}>{value}</div>
-    </div>
-  );
-
-  return (
-    <div style={{display:"flex",flexDirection:"column",gap:16}}>
-      <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        <span style={{fontSize:11,color:T.hint}}>{total} trades</span>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10}}>
-        <Metric label="Net P&L ($)" value={fmtDollars(netDollars)} color={netDollars>=0?T.green:T.red}/>
-        <Metric label="Avg profit ($)" value={avgWin!=null?fmtDollars(avgWin):"—"} color={T.green}/>
-        <Metric label="Win %" value={total?(wins/total*100).toFixed(0)+"%":"—"} color={total&&wins/total>=0.5?T.green:T.red}/>
-        <Metric label="BE %" value={total?(bes/total*100).toFixed(0)+"%":"—"} color={T.yellow}/>
-        <Metric label="Avg win ($)" value={avgWin!=null?fmtDollars(avgWin):"—"} color={T.green}/>
-        <Metric label="Avg loss ($)" value={avgLoss!=null?fmtDollars(avgLoss):"—"} color={T.red}/>
-        <Metric label="Best trade" value={bestTrade!=null?fmtDollars(bestTrade):"—"} color={T.green}/>
-        <Metric label="Worst trade" value={worstTrade!=null?fmtDollars(worstTrade):"—"} color={T.red}/>
-        <Metric label="Max win streak" value={maxWS} color={T.green}/>
-        <Metric label="Max loss streak" value={maxLS} color={T.red}/>
-      </div>
-
-      <Card>
-        <CardHead title="Breakdown" action={
-          <div style={{display:"flex",gap:6}}>
-            {[["strategy","Strategy"],["direction","Direction"],["symbol","Symbol"],["dow","Day"]].map(([v,l])=>(
-              <button key={v} style={{...btn(dim===v?"primary":"ghost"),padding:"4px 10px",fontSize:11}} onClick={()=>setDim(v)}>{l}</button>
-            ))}
-          </div>
-        }/>
-        <div style={{padding:"14px"}}>
-          {data.length>0
-            ? <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={data} margin={{top:4,right:8,left:0,bottom:0}}>
-                  <CartesianGrid strokeDasharray="3 3" stroke={T.border} vertical={false}/>
-                  <XAxis dataKey="name" tickLine={false} axisLine={false} tick={{fontSize:11,fill:T.muted}}/>
-                  <YAxis yAxisId="pnl" tickLine={false} axisLine={false} tick={{fontSize:10,fill:T.hint}} tickFormatter={v=>fmtDollars(v)} width={48}/>
-                  <YAxis yAxisId="wr" orientation="right" tickLine={false} axisLine={false} tick={{fontSize:10,fill:T.yellow}} tickFormatter={v=>v+"%"} domain={[0,100]} width={32}/>
-                  <Tooltip contentStyle={{background:T.card,border:`0.5px solid ${T.border2}`,borderRadius:6,fontSize:11}} formatter={(v,n)=>[n==="wr"?v.toFixed(0)+"%":fmtDollars(v),n==="wr"?"Win rate":"Net P&L ($)"]}/>
-                  <ReferenceLine yAxisId="pnl" y={0} stroke={T.border2}/>
-                  <Bar yAxisId="pnl" dataKey="netDollars" radius={[3,3,0,0]} name="netDollars" fill={T.green} shape={p=><rect {...p} fill={p.value>=0?T.green:T.red} fillOpacity={0.75}/>}/>
-                  <Bar yAxisId="wr" dataKey="winPct" radius={[3,3,0,0]} name="wr" fill={T.yellow} fillOpacity={0.3}/>
-                </BarChart>
-              </ResponsiveContainer>
-            : <div style={{height:200,display:"flex",alignItems:"center",justifyContent:"center",color:T.hint,fontSize:12}}>No data</div>
-          }
-        </div>
-      </Card>
-
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16}}>
-        {[["By strategy",chartData.strategy],["By direction",chartData.direction],["By symbol",chartData.symbol]].map(([title,rows])=>(
-          <Card key={title}>
-            <CardHead title={title}/>
-            <div style={{padding:"12px 14px"}}>
-              {rows.length===0?<div style={{fontSize:12,color:T.hint,textAlign:"center",padding:"20px 0"}}>No data</div>:
-              <table style={{width:"100%",fontSize:11,borderCollapse:"collapse"}}>
-                <thead><tr>
-                  {["Label","#","W","L","BE","Win%","Net P&L ($)"].map(h=><th key={h} style={{textAlign:h==="Label"?"left":"right",color:T.hint,fontWeight:500,fontSize:10,padding:"3px 0",paddingBottom:6,borderBottom:`0.5px solid ${T.border}`}}>{h}</th>)}
-                </tr></thead>
-                <tbody>
-                  {rows.map(x=>(
-                    <tr key={x.name}>
-                      <td style={{padding:"5px 0",color:T.muted}}>{x.name}</td>
-                      <td style={{textAlign:"right",color:T.muted}}>{x.count}</td>
-                      <td style={{textAlign:"right",color:T.green}}>{x.wins}</td>
-                      <td style={{textAlign:"right",color:T.red}}>{x.losses}</td>
-                      <td style={{textAlign:"right",color:T.yellow}}>{x.bes}</td>
-                      <td style={{textAlign:"right",color:x.winPct>=50?T.green:x.winPct>=40?T.yellow:T.red,fontWeight:500}}>{x.winPct.toFixed(0)}%</td>
-                      <td style={{textAlign:"right",fontWeight:500,color:x.netDollars>=0?T.green:T.red}}>{fmtDollars(x.netDollars)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>}
-            </div>
-          </Card>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Accounts Page ─────────────────────────────────────────────────────────────
-function AccountsPage({accounts, trades, settings={}, onAdd, onEdit, onDelete}) {
-  const sortedAccounts=[...accounts].sort((a,b)=>{
-    const lastA=trades.filter(t=>t.journal?.accountId===a.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
-    const lastB=trades.filter(t=>t.journal?.accountId===b.id).reduce((mx,t)=>{const ts=t.fill?.soldTimestamp||"";return ts>mx?ts:mx;},"");
-    return lastB>lastA?1:-1;
-  });
-  return (
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
-        <span style={{fontSize:18,fontWeight:600}}>Accounts</span>
-        <button style={btn()} onClick={onAdd}>+ Add account</button>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(360px,1fr))",gap:16}}>
-        {sortedAccounts.map(a=>(
-          <AccountCard key={a.id} a={a} trades={trades} settings={settings} onEdit={onEdit} onDelete={onDelete}/>
-        ))}
-        {accounts.length===0&&(
-          <Card style={{padding:60,textAlign:"center",gridColumn:"1/-1"}}>
-            <div style={{fontSize:32,marginBottom:10}}>🏦</div>
-            <div style={{fontSize:14,fontWeight:500}}>No accounts yet</div>
-            <div style={{fontSize:12,color:T.hint,marginTop:4}}>Click "+ Add account" to get started</div>
-          </Card>
-        )}
-      </div>
-    </div>
+    <Mt5AccountAnalytics
+      account={acc}
+      trades={mt5Trades.filter(t=>t.accountId===acc.id)}
+      T={T}
+      fmtDollars={fmtDollars}
+      dailyBotAssignments={dailyBotAssignments[acc.id]||{}}
+      onAssignBots={(date,botNames)=>onAssignBots(acc.id,date,botNames)}
+      onBulkAssignBots={(dates,botName)=>onBulkAssignBots(acc.id,dates,botName)}
+      bots={bots}
+    />
   );
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
 function SettingsPage({data, onDataChange}) {
-  const [newTag,setNewTag]=useState("");
-  const [newStrat,setNewStrat]=useState("");
   const [toast,setToast]=useState("");
   const toast_=msg=>{setToast(msg);setTimeout(()=>setToast(""),2500);};
-
-  const settings = data.settings || {};
-  const strategies = settings.strategies || [];
-  const tags = settings.tags || [];
-  const beThresholdUsd = settings.beThresholdUsd ?? 50;
-  const sourceTimezone = settings.sourceTimezone ?? "Europe/Berlin";
-  const commissions = settings.commissions || { micro: 1.03, mini: 3.50 };
-
-  function patchSettings(patch) {
-    onDataChange({...data, settings:{...settings, ...patch}});
-  }
 
   function exportJSON(){
     const b=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
     const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=`trade_journal_${new Date().toISOString().slice(0,10)}.json`;a.click();toast_("Exported ✓");
   }
   function exportCSV(){
-    const h=["boughtTimestamp","soldTimestamp","symbol","direction","qty","grossPnlDollars","netPnlDollars","netPnlTicks","strategy","riskTicks","rCollected","accountId","tags","notes","tradingViewUrl","rating"];
-    const rows=data.trades.map(t=>{
-      const flat={...t.fill,...t.journal};
-      return h.map(k=>{
-        const v=flat[k];
-        if(Array.isArray(v)) return JSON.stringify(v.join("|"));
-        return JSON.stringify(v??'');
-      }).join(",");
-    });
+    const h=["openTime","closeTime","symbol","direction","volume","pnl","classification","accountId","commission","swap"];
+    const rows=data.trades.map(t=>h.map(k=>{
+      const v=t[k];
+      if(Array.isArray(v)) return JSON.stringify(v.join("|"));
+      return JSON.stringify(v??'');
+    }).join(","));
     const b=new Blob([[h.join(","),...rows].join("\n")],{type:"text/csv"});
     const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="trades_export.csv";a.click();toast_("CSV exported ✓");
   }
@@ -829,18 +68,10 @@ function SettingsPage({data, onDataChange}) {
     const r=new FileReader();r.onload=ev=>{try{const p=JSON.parse(ev.target.result);if(!p.trades)throw 0;onDataChange(p);toast_("Restored "+p.trades.length+" trades ✓");}catch{toast_("Invalid file");}};r.readAsText(f);
   }
 
-  const inputStyle = {
-    padding:"5px 8px", borderRadius:5, fontSize:12, border:`0.5px solid ${T.border2}`,
-    background:T.surface, color:T.text, fontFamily:"var(--font-sans)", width:"100%", boxSizing:"border-box",
-  };
-  const labelStyle = {fontSize:11, color:T.muted, marginBottom:4, display:"block"};
-  const numberInputStyle = {...inputStyle, width:100};
-
   return (
     <div style={{maxWidth:560,display:"flex",flexDirection:"column",gap:14}}>
       {toast&&<div style={{position:"fixed",bottom:24,right:24,background:T.card,border:`0.5px solid ${T.green}`,color:T.green,padding:"10px 18px",borderRadius:8,fontSize:12,zIndex:999}}>{toast}</div>}
 
-      {/* Section 1: Data management */}
       <Card>
         <CardHead title="Data management"/>
         <div style={{padding:"14px",display:"flex",flexDirection:"column",gap:10}}>
@@ -849,151 +80,7 @@ function SettingsPage({data, onDataChange}) {
             <button style={btn("ghost")} onClick={exportCSV}>Export trades (CSV)</button>
             <label style={{...btn("ghost"),cursor:"pointer"}}>Restore backup<input type="file" accept=".json" style={{display:"none"}} onChange={importJSON}/></label>
           </div>
-          <div style={{fontSize:11,color:T.hint,lineHeight:1.7}}>All data is stored as a local .json file on your machine. Export JSON backups regularly. The CSV export contains all trade fields for use in spreadsheets.</div>
-        </div>
-      </Card>
-
-      {/* Section 2: Trade classification */}
-      <Card>
-        <CardHead title="Trade classification"/>
-        <div style={{padding:"14px",display:"flex",flexDirection:"column",gap:12}}>
-          <div>
-            <label style={labelStyle}>Break-even threshold ($) — trades within ±$X net P&L are classified as BE</label>
-            <input
-              type="number" min={0} step={5}
-              value={beThresholdUsd}
-              onChange={e=>patchSettings({beThresholdUsd:Math.max(0,parseFloat(e.target.value)||0)})}
-              style={numberInputStyle}
-            />
-          </div>
-          <div style={{fontSize:11,color:T.hint,lineHeight:1.7}}>This applies dynamically to all trades — no re-import needed when you change it.</div>
-        </div>
-      </Card>
-
-      {/* Section 2b: Import settings */}
-      <Card>
-        <CardHead title="Import settings"/>
-        <div style={{padding:"14px",display:"flex",flexDirection:"column",gap:12}}>
-          <div>
-            <label style={labelStyle}>Your local timezone — Tradovate CSV timestamps will be converted to NY time on import</label>
-            <select
-              value={sourceTimezone}
-              onChange={e=>patchSettings({sourceTimezone:e.target.value})}
-              style={{...inputStyle,width:"auto"}}
-            >
-              <option value="Europe/London">Europe/London (GMT/BST)</option>
-              <option value="Europe/Berlin">Europe/Berlin (CET/CEST)</option>
-              <option value="Europe/Paris">Europe/Paris (CET/CEST)</option>
-              <option value="America/Chicago">America/Chicago (CST/CDT)</option>
-              <option value="America/Denver">America/Denver (MST/MDT)</option>
-              <option value="America/Los_Angeles">America/Los_Angeles (PST/PDT)</option>
-              <option value="America/New_York">America/New_York (already NY time)</option>
-            </select>
-          </div>
-          <div style={{fontSize:11,color:T.hint,lineHeight:1.7}}>Only affects new imports. Use the button below to fix timestamps on existing trades.</div>
-          <button
-            style={btn("ghost")}
-            onClick={()=>{
-              let count=0;
-              const updated = data.trades.map(t=>{
-                const f=t.fill;
-                if(!f) return t;
-                // Heuristic: skip if already looks like NY market hours (before 14:00 local)
-                const ts = f.boughtTimestamp||"";
-                const timeH = ts.includes("T") ? parseInt(ts.split("T")[1].slice(0,2),10) : 25;
-                if(timeH < 14) return t;
-                count++;
-                return {
-                  ...t,
-                  fill:{
-                    ...f,
-                    boughtTimestamp: convertToNY(f.boughtTimestamp, sourceTimezone),
-                    soldTimestamp: convertToNY(f.soldTimestamp, sourceTimezone),
-                  }
-                };
-              });
-              onDataChange({...data, trades:updated});
-              toast_(`Converted ${count} trade timestamps ✓`);
-            }}
-          >Convert existing timestamps to NY time</button>
-        </div>
-      </Card>
-
-      {/* Section 3: Commissions */}
-      <Card>
-        <CardHead title="Commissions"/>
-        <div style={{padding:"14px",display:"flex",flexDirection:"column",gap:12}}>
-          <div>
-            <label style={labelStyle}>Micro contract commission ($/contract) — MNQ, MES, MYM, M2K</label>
-            <input
-              type="number" step={0.01} min={0}
-              value={commissions.micro}
-              onChange={e=>patchSettings({commissions:{...commissions,micro:parseFloat(e.target.value)||0}})}
-              style={numberInputStyle}
-            />
-          </div>
-          <div>
-            <label style={labelStyle}>Mini contract commission ($/contract) — NQ, ES, YM</label>
-            <input
-              type="number" step={0.01} min={0}
-              value={commissions.mini}
-              onChange={e=>patchSettings({commissions:{...commissions,mini:parseFloat(e.target.value)||0}})}
-              style={numberInputStyle}
-            />
-          </div>
-          <div style={{fontSize:11,color:T.hint,lineHeight:1.7}}>Commissions are deducted from Tradovate gross P&amp;L to calculate net figures.</div>
-        </div>
-      </Card>
-
-      {/* Section 4: Strategies */}
-      <Card>
-        <CardHead title="Strategies"/>
-        <div style={{padding:"14px"}}>
-          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}}>
-            {strategies.map(s=>(
-              <div key={s} style={{display:"flex",alignItems:"center",gap:6,background:T.surface,border:`0.5px solid ${T.border}`,borderRadius:6,padding:"4px 10px"}}>
-                <span style={{fontSize:12,color:T.text}}>{s}</span>
-                <button style={{background:"none",border:"none",cursor:"pointer",color:T.hint,fontSize:16,lineHeight:1,padding:0}} onClick={()=>patchSettings({strategies:strategies.filter(x=>x!==s)})}>×</button>
-              </div>
-            ))}
-            {strategies.length===0&&<span style={{fontSize:12,color:T.hint}}>No strategies yet</span>}
-          </div>
-          <div style={{display:"flex",gap:8}}>
-            <input
-              value={newStrat}
-              onChange={e=>setNewStrat(e.target.value)}
-              placeholder="New strategy..."
-              style={{...inputStyle,flex:1}}
-              onKeyDown={e=>{if(e.key==="Enter"&&newStrat.trim()){patchSettings({strategies:[...strategies,newStrat.trim()]});setNewStrat("");}}}
-            />
-            <button style={btn()} onClick={()=>{if(newStrat.trim()){patchSettings({strategies:[...strategies,newStrat.trim()]});setNewStrat("");}}}>Add</button>
-          </div>
-        </div>
-      </Card>
-
-      {/* Section 5: Tags */}
-      <Card>
-        <CardHead title="Tags"/>
-        <div style={{padding:"14px"}}>
-          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}}>
-            {tags.map(t=>(
-              <div key={t} style={{display:"flex",alignItems:"center",gap:4,background:T.surface,border:`0.5px solid ${T.border}`,borderRadius:6,padding:"4px 10px",fontSize:12}}>
-                <span style={{color:T.text}}>{t}</span>
-                <button style={{background:"none",border:"none",cursor:"pointer",color:T.hint,fontSize:16,lineHeight:1,padding:0}} onClick={()=>patchSettings({tags:tags.filter(x=>x!==t)})}>×</button>
-              </div>
-            ))}
-            {tags.length===0&&<span style={{fontSize:12,color:T.hint}}>No tags yet</span>}
-          </div>
-          <div style={{display:"flex",gap:8}}>
-            <input
-              value={newTag}
-              onChange={e=>setNewTag(e.target.value)}
-              placeholder="New tag..."
-              style={{...inputStyle,flex:1}}
-              onKeyDown={e=>{if(e.key==="Enter"&&newTag.trim()){patchSettings({tags:[...tags,newTag.trim()]});setNewTag("");}}}
-            />
-            <button style={btn()} onClick={()=>{if(newTag.trim()){patchSettings({tags:[...tags,newTag.trim()]});setNewTag("");}}}>Add</button>
-          </div>
+          <div style={{fontSize:11,color:T.hint,lineHeight:1.7}}>All data is stored as a local .json file on your machine. Export JSON backups regularly. The CSV export contains all MT5 trade fields for use in spreadsheets.</div>
         </div>
       </Card>
     </div>
@@ -1064,10 +151,7 @@ export default function App() {
   const [writeError, setWriteError] = useState(null);
   const [page, setPage] = useState("overview");
   const [modal, setModal] = useState(null);
-  const [editItem, setEditItem] = useState(null);
-  const [detailTrade, setDetailTrade] = useState(null);
-  const [selectedAccIds, setSelectedAccIds] = useState([]);
-  const [selectedMt5AccIds, setSelectedMt5AccIds] = useState([]);
+  const [selectedMt5AccId, setSelectedMt5AccId] = useState(null);
   const openingRef = useRef(false);
 
   useEffect(() => {
@@ -1123,47 +207,28 @@ export default function App() {
     return <BootScreen onOpen={handleOpenFile} onCreate={handleCreateFile} />;
   }
 
-  function saveTrade(t) {
-    const id=t.fill?.buyFillId;
-    const exists=id&&data.trades.find(x=>x.fill?.buyFillId===id);
-    setData({...data,trades:exists?data.trades.map(x=>x.fill?.buyFillId===id?t:x):[...data.trades,t]});
-    setModal(null);
-  }
-  function deleteTrade(buyFillId) {
-    if(!confirm("Delete this trade?"))return;
-    setData({...data,trades:data.trades.filter(t=>t.fill?.buyFillId!==buyFillId)});
-  }
-  function saveAccount(a) {
-    const exists=data.accounts.find(x=>x.id===a.id);
-    setData({...data,accounts:exists?data.accounts.map(x=>x.id===a.id?a:x):[...data.accounts,a]});
-    setModal(null);
-  }
-  function deleteAccount(id) {
-    if(!confirm("Delete this account?"))return;
-    setData({...data,accounts:data.accounts.filter(a=>a.id!==id)});
-  }
-  function importTrades(ts) {
-    const updatedIds = new Set(ts.filter(t => t.fill?._updated).map(t => t.fill.buyFillId));
-    const base = data.trades.filter(t => !updatedIds.has(t.fill?.buyFillId));
-    const clean = ts.map(t => {
-      if (!t.fill?._updated) return t;
-      const { _updated, ...fill } = t.fill;
-      return { ...t, fill };
-    });
-    setData({ ...data, trades: [...base, ...clean] });
-    setModal(null);
-  }
-  async function handleMerge(incomingTrades) {
-    const merged = mergeTrades(data.trades, incomingTrades);
-    const nextData = { ...data, trades: merged };
-    setData(nextData);
-  }
-  function assignBots(accountId, date, bots) {
+  function assignBots(accountId, date, botNames) {
     setData({
       ...data,
       dailyBotAssignments: {
         ...data.dailyBotAssignments,
-        [accountId]: { ...(data.dailyBotAssignments?.[accountId] || {}), [date]: bots },
+        [accountId]: { ...(data.dailyBotAssignments?.[accountId] || {}), [date]: botNames },
+      },
+    });
+  }
+
+  // Assigns the same bot to several dates in one update — a loop of
+  // assignBots() calls would each read the same stale `data` closure and
+  // overwrite each other, leaving only the last date applied.
+  function assignBotsBulk(accountId, dates, botName) {
+    setData({
+      ...data,
+      dailyBotAssignments: {
+        ...data.dailyBotAssignments,
+        [accountId]: {
+          ...(data.dailyBotAssignments?.[accountId] || {}),
+          ...Object.fromEntries(dates.map(date => [date, [botName]])),
+        },
       },
     });
   }
@@ -1172,21 +237,51 @@ export default function App() {
     setData({ ...data, mt5Accounts: [...(data.mt5Accounts || []), account] });
   }
 
-  const PAGES=[["overview","Overview"],["dashboard","Dashboard"],["trades","Trades"],["analytics","Analytics"],["accounts","Accounts"],["settings","Settings"]];
-  const mt5Accounts = [...ACCOUNTS, ...(data.mt5Accounts || [])];
-  const filteredTrades=selectedAccIds.length===0?data.trades:data.trades.filter(t=>selectedAccIds.includes(t.journal?.accountId));
-  function toggleAccId(id) {
-    setSelectedAccIds(prev=>{
-      if(prev.includes(id)) return prev.length===1?[]:prev.filter(x=>x!==id);
-      return [...prev,id];
+  async function handleMerge(incomingTrades) {
+    const merged = mergeTrades(data.trades, incomingTrades);
+    setData({ ...data, trades: merged });
+  }
+
+  function saveBot(b) {
+    const bots = data.bots || [];
+    const exists = bots.find(x => x.id === b.id);
+    setData({ ...data, bots: exists ? bots.map(x => x.id === b.id ? b : x) : [...bots, { ...b, id: b.id || uid() }] });
+  }
+  function deleteBot(id) {
+    if (!confirm("Delete this bot?")) return;
+    setData({ ...data, bots: (data.bots || []).filter(b => b.id !== id) });
+  }
+
+  function saveAccountOverride(accountId, patch) {
+    setData({
+      ...data,
+      accountOverrides: {
+        ...data.accountOverrides,
+        [accountId]: { ...(data.accountOverrides?.[accountId] || {}), ...patch },
+      },
     });
   }
-  function toggleMt5AccId(id) {
-    setSelectedMt5AccIds(prev=>{
-      if(prev.includes(id)) return prev.length===1?[]:prev.filter(x=>x!==id);
-      return [...prev,id];
-    });
+  function setDeprecated(accountId, deprecated) {
+    if (deprecated) {
+      const acc = mt5Accounts.find(a => a.id === accountId);
+      const today = new Date().toISOString().slice(0, 10);
+      const daysSurvived = acc?.openedDate
+        ? Math.max(0, Math.floor((new Date(today) - new Date(acc.openedDate)) / 86400000))
+        : null;
+      saveAccountOverride(accountId, {
+        deprecated: true,
+        deprecatedDate: today,
+        daysSurvived,
+        stageAtDeprecation: acc?.phase ?? null,
+      });
+    } else {
+      saveAccountOverride(accountId, { deprecated: false, deprecatedDate: null, daysSurvived: null, stageAtDeprecation: null });
+    }
   }
+
+  const PAGES=[["overview","Overview"],["dashboard","Dashboard"],["bots","Bots"],["accounts","Accounts"],["settings","Settings"]];
+  const mt5Accounts = [...ACCOUNTS, ...(data.mt5Accounts || [])]
+    .map(a => ({ ...a, ...(data.accountOverrides?.[a.id] || {}) }));
 
   return (
     <div style={{minHeight:"100vh",background:T.bg,fontFamily:"var(--font-sans)"}}>
@@ -1216,42 +311,29 @@ export default function App() {
           ))}
         </div>
         <div style={{display:"flex",gap:8}}>
-          <button style={btn("ghost")} onClick={()=>{setEditItem(null);setModal("import");}}>↑ Import CSV</button>
           <button style={btn("ghost")} onClick={()=>setModal("import-mt5")}>↑ Import MT5</button>
         </div>
       </div>
 
-      {/* Account filter bar — shown on Analytics (Tradovate accounts) */}
-      {page==="analytics"&&data.accounts.length>0&&(
-        <div style={{background:T.card,borderBottom:`0.5px solid ${T.border}`,padding:"6px 20px",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-          <span style={{fontSize:11,color:T.hint,marginRight:2}}>Account:</span>
-          <button
-            onClick={()=>setSelectedAccIds([])}
-            style={{...btn(selectedAccIds.length===0?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
-          >All</button>
-          {data.accounts.map(a=>(
-            <button key={a.id}
-              onClick={()=>toggleAccId(a.id)}
-              style={{...btn(selectedAccIds.includes(a.id)?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
-            >{a.name}</button>
-          ))}
-        </div>
-      )}
-
-      {/* MT5 account filter bar — shown on Dashboard */}
+      {/* MT5 account picker — shown on Dashboard, single-select */}
       {page==="dashboard"&&(
         <div style={{background:T.card,borderBottom:`0.5px solid ${T.border}`,padding:"6px 20px",display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
           <span style={{fontSize:11,color:T.hint,marginRight:2}}>Account:</span>
-          <button
-            onClick={()=>setSelectedMt5AccIds([])}
-            style={{...btn(selectedMt5AccIds.length===0?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
-          >All</button>
-          {mt5Accounts.map(a=>(
+          {mt5Accounts.filter(a=>!a.deprecated).map(a=>(
             <button key={a.id}
-              onClick={()=>toggleMt5AccId(a.id)}
-              style={{...btn(selectedMt5AccIds.includes(a.id)?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
-            >{a.label}</button>
+              onClick={()=>setSelectedMt5AccId(a.id)}
+              style={{...btn(selectedMt5AccId===a.id?"primary":"ghost"),padding:"3px 10px",fontSize:11}}
+            >{a.label} · #{a.login}</button>
           ))}
+          {mt5Accounts.some(a=>a.deprecated)&&(<>
+            <span style={{fontSize:11,color:T.hint,marginLeft:12}}>Deprecated:</span>
+            {mt5Accounts.filter(a=>a.deprecated).map(a=>(
+              <button key={a.id}
+                onClick={()=>setSelectedMt5AccId(a.id)}
+                style={{...btn(selectedMt5AccId===a.id?"primary":"ghost"),padding:"3px 10px",fontSize:11,opacity:0.55}}
+              >{a.label} · #{a.login}</button>
+            ))}
+          </>)}
         </div>
       )}
 
@@ -1259,58 +341,36 @@ export default function App() {
       <div style={{padding:"20px",maxWidth:1100,margin:"0 auto"}}>
         {page==="overview"&&(
           <CrossAccountDashboard
-            accounts={mt5Accounts}
+            accounts={mt5Accounts.filter(a=>!a.deprecated)}
             allTrades={data.trades}
             T={T}
             fmtDollars={fmtDollars}
-            onSelectAccount={id=>{setSelectedMt5AccIds([id]);setPage("dashboard");}}
+            onSelectAccount={id=>{setSelectedMt5AccId(id);setPage("dashboard");}}
           />
         )}
         {page==="dashboard"&&(
           <Dashboard
-            selectedIds={selectedMt5AccIds}
+            selectedId={selectedMt5AccId}
             accounts={mt5Accounts}
             mt5Trades={data.trades.filter(t=>t.platform==="mt5")}
             fmtDollars={fmtDollars}
             dailyBotAssignments={data.dailyBotAssignments||{}}
             onAssignBots={assignBots}
+            onBulkAssignBots={assignBotsBulk}
+            bots={data.bots||[]}
           />
         )}
-        {page==="trades"&&(
-          <TradeLog
-            trades={data.trades}
-            accounts={data.accounts}
-            settings={data.settings||{}}
-            onEdit={setDetailTrade}
-            onDelete={deleteTrade}
-          />
-        )}
-        {page==="analytics"&&<Analytics trades={filteredTrades} strategies={data.settings?.strategies||[]} settings={data.settings||{}}/>}
-        {page==="accounts"&&<AccountsPage accounts={data.accounts} trades={data.trades} settings={data.settings||{}} onAdd={()=>{setEditItem(null);setModal("account");}} onEdit={a=>{setEditItem(a);setModal("account");}} onDelete={deleteAccount}/>}
+        {page==="bots"&&<BotsPage bots={data.bots||[]} onSave={saveBot} onDelete={deleteBot}/>}
+        {page==="accounts"&&<AccountsPage accounts={mt5Accounts} onSaveOverride={saveAccountOverride} onSetDeprecated={setDeprecated}/>}
         {page==="settings"&&<SettingsPage data={data} onDataChange={setData}/>}
       </div>
 
-      {modal==="account"&&<AccountForm acct={editItem} onSave={saveAccount} onClose={()=>setModal(null)}/>}
-      {modal==="import"&&<TradovateImportModal accounts={data.accounts} settings={data.settings} existingBuyFillIds={data.trades.map(t=>t.fill?.buyFillId).filter(Boolean)} existingJournalMap={new Map(data.trades.map(t=>[t.fill?.buyFillId,t.journal]).filter(([id])=>id))} onImport={importTrades} onClose={()=>setModal(null)}/>}
       {modal==="import-mt5"&&(
         <Mt5ImportModal
           accounts={mt5Accounts}
           onImport={(trades)=>{ handleMerge(trades); setModal(null); }}
           onCreateAccount={createMt5Account}
           onClose={()=>setModal(null)}
-        />
-      )}
-      {detailTrade&&(
-        <TradeDetailPanel
-          trade={detailTrade}
-          strategies={data.settings?.strategies||[]}
-          tags={data.settings?.tags||[]}
-          settings={data.settings||{}}
-          onSave={(updated)=>{
-            setDetailTrade(updated);
-            setData({...data,trades:data.trades.map(t=>t.fill?.buyFillId===updated.fill?.buyFillId?updated:t)});
-          }}
-          onClose={()=>setDetailTrade(null)}
         />
       )}
     </div>

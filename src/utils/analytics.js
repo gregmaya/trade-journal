@@ -21,7 +21,6 @@ export function computeStats(trades) {
     total,
     winCount,
     lossCount,
-    beCount: trades.filter(t => t.classification === 'be').length,
     winRate,           // 0–1
     grossProfit,
     grossLoss,
@@ -48,23 +47,20 @@ export function computeDayOfWeekBreakdown(trades) {
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const groups = Object.fromEntries(DAYS.map(d => [d, []]))
   for (const t of trades) {
-    const day = DAYS[new Date(t.openTime).getDay()]
+    const day = DAYS[new Date(t.openTime).getUTCDay()]
     groups[day].push(t)
   }
   return Object.fromEntries(DAYS.map(d => [d, computeStats(groups[d])]))
 }
 
-/** Hour-of-day × day-of-week entry heatmap (NY time) */
+/** Hour-of-day × day-of-week entry heatmap (raw recorded time — no timezone conversion) */
 export function computeHourHeatmap(trades) {
   const cells = {}
   const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   for (const t of trades) {
     const d = new Date(t.openTime)
-    const parts = new Intl.DateTimeFormat('en-US', {
-      hour: 'numeric', hour12: false, timeZone: 'America/New_York',
-    }).formatToParts(d)
-    const hour = parseInt(parts.find(p => p.type === 'hour').value)
-    const day  = DAYS[d.getDay()]
+    const hour = d.getUTCHours()
+    const day  = DAYS[d.getUTCDay()]
     const key  = `${day}-${hour}`
     if (!cells[key]) cells[key] = { day, hour, count: 0, pnl: 0 }
     cells[key].count++

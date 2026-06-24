@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mergeTrades, defaultData } from '../storage.js'
+import { mergeTrades, defaultData, migrateClassifications } from '../storage.js'
 
 describe('mergeTrades', () => {
   it('deduplicates by id', () => {
@@ -26,5 +26,29 @@ describe('mergeTrades', () => {
 describe('defaultData', () => {
   it('includes an empty mt5Accounts list for runtime-created accounts', () => {
     expect(defaultData().mt5Accounts).toEqual([])
+  })
+
+  it('includes an empty global bots registry and accountOverrides map', () => {
+    expect(defaultData().bots).toEqual([])
+    expect(defaultData().accountOverrides).toEqual({})
+  })
+})
+
+describe('migrateClassifications', () => {
+  it('rewrites be trades to win/loss based on pnl sign', () => {
+    const data = { trades: [
+      { id: '1', pnl: 10, classification: 'be' },
+      { id: '2', pnl: -10, classification: 'be' },
+      { id: '3', pnl: 5, classification: 'win' },
+    ] }
+    const result = migrateClassifications(data)
+    expect(result.trades[0].classification).toBe('win')
+    expect(result.trades[1].classification).toBe('loss')
+    expect(result.trades[2].classification).toBe('win')
+  })
+
+  it('is a no-op when no be trades exist', () => {
+    const data = { trades: [{ id: '1', pnl: 5, classification: 'win' }] }
+    expect(migrateClassifications(data)).toBe(data)
   })
 })

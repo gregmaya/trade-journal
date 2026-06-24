@@ -48,10 +48,20 @@ export async function readData() {
   const file = await _handle.getFile();
   const text = await file.text();
   try {
-    return JSON.parse(text);
+    return normalizeData(JSON.parse(text));
   } catch {
     return defaultData();
   }
+}
+
+/**
+ * Backfills top-level keys missing from older persisted data and runs
+ * one-time migrations (e.g. BE classification removal).
+ * @param {object} data
+ * @returns {object}
+ */
+function normalizeData(data) {
+  return migrateClassifications({ ...defaultData(), ...data });
 }
 
 export async function writeData(data) {
@@ -67,7 +77,8 @@ export async function writeData(data) {
 
 export function readLocalStorage() {
   try {
-    return JSON.parse(localStorage.getItem(LS_KEY)) || defaultData();
+    const raw = JSON.parse(localStorage.getItem(LS_KEY));
+    return raw ? normalizeData(raw) : defaultData();
   } catch {
     return defaultData();
   }
@@ -80,11 +91,31 @@ export function defaultData() {
     settings: {
       strategies: ["ORB", "ILM", "IMPULSE TRADE", "None"],
       tags: [],
-      beThresholdTicks: 3,
       commissions: { micro: 1.03, mini: 3.50 },
     },
     dailyBotAssignments: {},
     mt5Accounts: [],
+    bots: [],
+    accountOverrides: {},
+  };
+}
+
+/**
+ * One-time normalizer: rewrites any persisted 'be' MT5 trade classification
+ * to strict binary win/loss, since the BE concept no longer exists.
+ * Idempotent — safe to run on every load.
+ * @param {object} data
+ * @returns {object}
+ */
+export function migrateClassifications(data) {
+  if (!data?.trades?.some(t => t.classification === 'be')) return data;
+  return {
+    ...data,
+    trades: data.trades.map(t =>
+      t.classification === 'be'
+        ? { ...t, classification: t.pnl > 0 ? 'win' : 'loss' }
+        : t
+    ),
   };
 }
 

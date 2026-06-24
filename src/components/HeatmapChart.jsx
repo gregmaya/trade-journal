@@ -13,7 +13,7 @@ export function HeatmapChart({ cells, T }) {
 
   return (
     <div>
-      <h4 style={{ color: T.text, marginBottom: 8 }}>Entry Heatmap (NY time)</h4>
+      <h4 style={{ color: T.text, marginBottom: 8 }}>Entry Heatmap</h4>
       <div style={{ overflowX: 'auto' }}>
         <div style={{ display: 'grid', gridTemplateColumns: `40px repeat(${HOURS.length}, 20px)`, gap: 2 }}>
           {/* Hour headers */}
