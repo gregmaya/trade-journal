@@ -1,6 +1,7 @@
 // src/components/Mt5ImportModal.jsx
 import { useState, useRef } from 'react'
 import { parseMt5XlsxRows, extractAccountLogin, extractPositions } from '../utils/parseMt5Report.js'
+import { parseQuantAnalyzerCsv, extractQuantAnalyzerLogin } from '../utils/parseQuantAnalyzerCsv.js'
 import { fmtDollars } from '../utils/compute.js'
 import { T, btn, Card } from '../utils/theme.jsx'
 
@@ -84,6 +85,41 @@ export function Mt5ImportModal({ accounts, onImport, onCreateAccount, onClose })
     reader.readAsArrayBuffer(file)
   }
 
+  function handleCsvFile(file) {
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result
+        const detectedLogin = extractQuantAnalyzerLogin(text)
+        if (!detectedLogin) {
+          setParseErr('Could not detect an account number in this CSV. Make sure it is a QuantAnalyzer export.')
+          return
+        }
+        const match = accounts.find(a => a.login === detectedLogin)
+        setLogin(detectedLogin)
+        setParseErr('')
+        if (match) {
+          const trades = parseQuantAnalyzerCsv(text, match.id)
+          if (trades.length === 0) {
+            setParseErr('No closed positions found in this CSV.')
+            return
+          }
+          setAccount(match)
+          setParsed(trades)
+          setStep('preview')
+        } else {
+          // Store the raw text so we can parse after account creation
+          setRows({ csvText: text })
+          setStep('create-account')
+        }
+      } catch (err) {
+        setParseErr(err.message || 'Failed to parse CSV. Make sure it is a QuantAnalyzer export.')
+      }
+    }
+    reader.onerror = () => setParseErr('Failed to read file.')
+    reader.readAsText(file)
+  }
+
   function handleCreateAccount() {
     const initialBalance = Number(newAccountForm.initialBalance)
     const newAccount = {
@@ -102,7 +138,22 @@ export function Mt5ImportModal({ accounts, onImport, onCreateAccount, onClose })
       phaseTargetPct: 0.10,
       openedDate: newAccountForm.openedDate || null,
     }
-    if (finishParse(rows, newAccount)) {
+    let succeeded = false
+    if (rows?.csvText) {
+      const trades = parseQuantAnalyzerCsv(rows.csvText, newAccount.id)
+      if (trades.length === 0) {
+        setParseErr('No closed positions found in this CSV.')
+        return
+      }
+      setAccount(newAccount)
+      setParsed(trades)
+      setParseErr('')
+      setStep('preview')
+      succeeded = true
+    } else {
+      succeeded = finishParse(rows, newAccount)
+    }
+    if (succeeded) {
       onCreateAccount(newAccount)
     }
   }
@@ -154,12 +205,13 @@ export function Mt5ImportModal({ accounts, onImport, onCreateAccount, onClose })
           style={{ border: `2px dashed ${drag ? T.green : T.border2}`, borderRadius: 10, padding: '50px 40px', textAlign: 'center', cursor: 'pointer', background: drag ? T.greenBg : 'transparent', transition: 'all 0.15s' }}
           onDragOver={e => { e.preventDefault(); setDrag(true) }}
           onDragLeave={() => setDrag(false)}
-          onDrop={e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
+          onDrop={e => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files[0]; if (f) { f.name.endsWith('.csv') ? handleCsvFile(f) : handleFile(f) } }}
           onClick={() => fileRef.current.click()}>
           <div style={{ fontSize: 32, marginBottom: 10 }}>📂</div>
           <div style={{ fontSize: 14, fontWeight: 500, marginBottom: 4 }}>Drop xlsx file here or click to browse</div>
-          <div style={{ fontSize: 12, color: T.hint }}>MT5 "Save as Report" .xlsx export</div>
-          <input ref={fileRef} type="file" accept=".xlsx" style={{ display: 'none' }} onChange={e => { const f = e.target.files[0]; if (f) handleFile(f) }} />
+          <div style={{ fontSize: 12, color: T.hint }}>MT5 "Save as Report" .xlsx  ·  QuantAnalyzer .csv</div>
+          <input ref={fileRef} type="file" accept=".xlsx,.csv" style={{ display: 'none' }}
+            onChange={e => { const f = e.target.files[0]; if (f) { f.name.endsWith('.csv') ? handleCsvFile(f) : handleFile(f) } }} />
         </div>
       </>}
       {step === 'create-account' && <>
