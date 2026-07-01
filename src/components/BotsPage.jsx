@@ -25,7 +25,7 @@ const labelStyle = { fontSize: 12, color: T.hint, display: 'block', marginBottom
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2) }
 
-const BOT_DEFAULTS = { id: '', name: '', pairs: '', lotSizes: {}, strategyDescription: '' }
+const BOT_DEFAULTS = { id: '', name: '', pairs: '', lotSizes: {}, strategyDescription: '', magicNumbers: [] }
 
 // Old bots only had a single lotSizePer100k applied to every pair — seed the
 // per-pair map from it once so existing data isn't silently blanked out.
@@ -39,7 +39,7 @@ function seedLotSizes(bot) {
 function BotForm({ bot, onSave, onClose }) {
   const [f, setF] = useState({
     ...BOT_DEFAULTS,
-    ...(bot ? { ...bot, pairs: (bot.pairs || []).join(', '), lotSizes: seedLotSizes(bot) } : {}),
+    ...(bot ? { ...bot, pairs: (bot.pairs || []).join(', '), lotSizes: seedLotSizes(bot), magicNumbers: bot.magicNumbers ?? [] } : {}),
   })
   const s = (k, v) => setF(p => ({ ...p, [k]: v }))
   const canSave = f.name.trim().length > 0
@@ -49,6 +49,17 @@ function BotForm({ bot, onSave, onClose }) {
     setF(p => ({ ...p, lotSizes: { ...p.lotSizes, [pair]: value === '' ? null : +value } }))
   }
 
+  function addMagicNumber(input) {
+    const n = parseInt(input, 10)
+    if (!isNaN(n) && !f.magicNumbers.includes(n)) {
+      s('magicNumbers', [...f.magicNumbers, n])
+    }
+  }
+
+  function removeMagicNumber(n) {
+    s('magicNumbers', f.magicNumbers.filter(x => x !== n))
+  }
+
   function handleSave() {
     onSave({
       id: f.id || uid(),
@@ -56,6 +67,7 @@ function BotForm({ bot, onSave, onClose }) {
       pairs: parsedPairs,
       lotSizes: Object.fromEntries(parsedPairs.map(p => [p, f.lotSizes[p] ?? null])),
       strategyDescription: f.strategyDescription,
+      magicNumbers: f.magicNumbers,
     })
   }
 
@@ -94,6 +106,29 @@ function BotForm({ bot, onSave, onClose }) {
           <label style={labelStyle}>Strategy description</label>
           <textarea style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} value={f.strategyDescription} onChange={e => s('strategyDescription', e.target.value)} placeholder="Placeholder — describe the bot's strategy here." />
         </div>
+        <div>
+          <label style={labelStyle}>Magic Numbers</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+            {f.magicNumbers.map(n => (
+              <span key={n} style={{ fontSize: 12, padding: '2px 8px', borderRadius: 4, background: T.surface, border: `0.5px solid ${T.border}`, display: 'flex', alignItems: 'center', gap: 4 }}>
+                {n}
+                <button onClick={() => removeMagicNumber(n)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, lineHeight: 1, color: T.hint, padding: 0 }}>×</button>
+              </span>
+            ))}
+          </div>
+          <input
+            style={inputStyle}
+            type="number"
+            placeholder="Type a magic number and press Enter"
+            onKeyDown={e => {
+              if (e.key === 'Enter' && e.target.value.trim()) {
+                addMagicNumber(e.target.value.trim())
+                e.target.value = ''
+                e.preventDefault()
+              }
+            }}
+          />
+        </div>
       </div>
     </Modal>
   )
@@ -125,6 +160,15 @@ export function BotsPage({ bots, onSave, onDelete }) {
               ))}
               {(bot.pairs || []).length === 0 && <span style={{ fontSize: 11, color: T.hint }}>No pairs set</span>}
             </div>
+            {(bot.magicNumbers ?? []).length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+                {bot.magicNumbers.map(n => (
+                  <span key={n} style={{ fontSize: 11, padding: '1px 6px', borderRadius: 3, background: T.surface, border: `0.5px solid ${T.border}`, color: T.hint }}>
+                    #{n}
+                  </span>
+                ))}
+              </div>
+            )}
             <div style={{ fontSize: 12, color: T.hint, marginBottom: 8 }}>
               {(() => {
                 const lotSizes = seedLotSizes(bot)
