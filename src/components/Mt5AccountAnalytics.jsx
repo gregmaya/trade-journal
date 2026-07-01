@@ -10,7 +10,6 @@ import {
 import { SymbolTable } from './SymbolTable.jsx'
 import { HeatmapChart } from './HeatmapChart.jsx'
 import { MonthlyCalendar } from './MonthlyCalendar.jsx'
-import { DailyBotLog } from './DailyBotLog.jsx'
 import { Mt5TradeTable } from './Mt5TradeTable.jsx'
 import { TradePnlChart } from './TradePnlChart.jsx'
 
@@ -49,11 +48,10 @@ const SECTIONS = [
   ['symbols', 'Symbol Breakdown'],
   ['heatmap', 'Heatmap'],
   ['calendar', 'Calendar'],
-  ['bots', 'Daily Bot Log'],
   ['trades', 'Trades'],
 ]
 
-export function Mt5AccountAnalytics({ account, trades, T, fmtDollars, dailyBotAssignments = {}, onAssignBots, onBulkAssignBots, bots = [] }) {
+export function Mt5AccountAnalytics({ account, trades, T, fmtDollars }) {
   const stats = computeStats(trades)
   const symbolBreakdown = computeSymbolBreakdown(trades)
   const heatmapCells = computeHourHeatmap(trades)
@@ -158,9 +156,6 @@ export function Mt5AccountAnalytics({ account, trades, T, fmtDollars, dailyBotAs
                 </div>
                 <MonthlyCalendar dailyPnl={dailyPnl} year={calYear} month={calMonth} T={T} />
               </div>
-            )}
-            {activeSection === 'bots' && (
-              <DailyBotLog bots={bots} dailyPnl={dailyPnl} assignments={dailyBotAssignments} onChange={onAssignBots} onBulkAssign={onBulkAssignBots} T={T} />
             )}
             {activeSection === 'trades' && <Mt5TradeTable trades={trades} T={T} fmtDollars={fmtDollars} />}
           </div>

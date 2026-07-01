@@ -22,7 +22,7 @@ const CardHead = ({title, action}) => (
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 // MT5 account deep-dive — single-select, renders Mt5AccountAnalytics for the
 // chosen account. Reached by clicking an Overview card or the account picker.
-function Dashboard({selectedId, accounts, mt5Trades, fmtDollars, dailyBotAssignments, onAssignBots, onBulkAssignBots, bots}) {
+function Dashboard({selectedId, accounts, mt5Trades, fmtDollars}) {
   const fallback = accounts.find(a => !a.deprecated) || accounts[0];
   const acc = accounts.find(a => a.id === selectedId) || fallback;
 
@@ -36,10 +36,6 @@ function Dashboard({selectedId, accounts, mt5Trades, fmtDollars, dailyBotAssignm
       trades={mt5Trades.filter(t=>t.accountId===acc.id)}
       T={T}
       fmtDollars={fmtDollars}
-      dailyBotAssignments={dailyBotAssignments[acc.id]||{}}
-      onAssignBots={(date,botNames)=>onAssignBots(acc.id,date,botNames)}
-      onBulkAssignBots={(dates,botName)=>onBulkAssignBots(acc.id,dates,botName)}
-      bots={bots}
     />
   );
 }
@@ -207,32 +203,6 @@ export default function App() {
     return <BootScreen onOpen={handleOpenFile} onCreate={handleCreateFile} />;
   }
 
-  function assignBots(accountId, date, botNames) {
-    setData({
-      ...data,
-      dailyBotAssignments: {
-        ...data.dailyBotAssignments,
-        [accountId]: { ...(data.dailyBotAssignments?.[accountId] || {}), [date]: botNames },
-      },
-    });
-  }
-
-  // Assigns the same bot to several dates in one update — a loop of
-  // assignBots() calls would each read the same stale `data` closure and
-  // overwrite each other, leaving only the last date applied.
-  function assignBotsBulk(accountId, dates, botName) {
-    setData({
-      ...data,
-      dailyBotAssignments: {
-        ...data.dailyBotAssignments,
-        [accountId]: {
-          ...(data.dailyBotAssignments?.[accountId] || {}),
-          ...Object.fromEntries(dates.map(date => [date, [botName]])),
-        },
-      },
-    });
-  }
-
   function createMt5Account(account) {
     setData({ ...data, mt5Accounts: [...(data.mt5Accounts || []), account] });
   }
@@ -354,10 +324,6 @@ export default function App() {
             accounts={mt5Accounts}
             mt5Trades={data.trades.filter(t=>t.platform==="mt5")}
             fmtDollars={fmtDollars}
-            dailyBotAssignments={data.dailyBotAssignments||{}}
-            onAssignBots={assignBots}
-            onBulkAssignBots={assignBotsBulk}
-            bots={data.bots||[]}
           />
         )}
         {page==="bots"&&<BotsPage bots={data.bots||[]} onSave={saveBot} onDelete={deleteBot}/>}
