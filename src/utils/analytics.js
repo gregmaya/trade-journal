@@ -109,3 +109,24 @@ export function computeProfitPctSeries(account, trades) {
     return { date, pct: (cum / account.initialBalance) * 100 }
   })
 }
+
+/**
+ * Cumulative % return series for a set of trades spanning multiple accounts.
+ * PnL is normalised to each trade's account.initialBalance so cross-account
+ * comparison is meaningful regardless of account size.
+ *
+ * @param {import('./tradeSchema.js').Trade[]} trades
+ * @param {Array<{id: string, initialBalance: number}>} accounts
+ * @returns {{ date: string, pct: number }[]}
+ */
+export function computeCumulativePctSeries(trades, accounts) {
+  if (!trades.length) return []
+  const balanceFor = Object.fromEntries(accounts.map(a => [a.id, a.initialBalance]))
+  const sorted = [...trades].sort((a, b) => new Date(a.closeTime) - new Date(b.closeTime))
+  let cum = 0
+  return sorted.map(t => {
+    const balance = balanceFor[t.accountId] ?? 10000
+    cum += (t.pnl / balance) * 100
+    return { date: t.closeTime.slice(0, 10), pct: Math.round(cum * 100) / 100 }
+  })
+}
