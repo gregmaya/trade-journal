@@ -26,6 +26,8 @@
  * @property {string}  strategy
  * @property {string}  tradingViewUrl
  * @property {number|null} rating
+ * @property {number|null} magicNumber   — EA magic number from QuantAnalyzer CSV; null for XLSX imports
+ * @property {string|null} orderComment  — MT5 order comment; used as trade id for CSV imports
  */
 
 /**

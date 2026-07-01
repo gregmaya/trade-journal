@@ -45,6 +45,8 @@ export function mapMtConnectTrade(raw, accountId) {
     strategy:     '',
     tradingViewUrl: '',
     rating:       null,
+    magicNumber:  raw.MagicNumber  ?? raw.magicNumber  ?? null,
+    orderComment: raw.OrderComment ?? raw.orderComment ?? null,
   }
 }
 
