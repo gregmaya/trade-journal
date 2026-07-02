@@ -25,7 +25,7 @@ const labelStyle = { fontSize: 12, color: T.hint, display: 'block', marginBottom
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2) }
 
-const BOT_DEFAULTS = { id: '', name: '', pairs: '', lotSizes: {}, strategyDescription: '', magicNumbers: [] }
+const BOT_DEFAULTS = { id: '', name: '', pairs: '', lotSizes: {}, strategyDescription: '', pairMagicNumbers: {} }
 
 // Old bots only had a single lotSizePer100k applied to every pair — seed the
 // per-pair map from it once so existing data isn't silently blanked out.
@@ -39,7 +39,7 @@ function seedLotSizes(bot) {
 function BotForm({ bot, onSave, onClose }) {
   const [f, setF] = useState({
     ...BOT_DEFAULTS,
-    ...(bot ? { ...bot, pairs: (bot.pairs || []).join(', '), lotSizes: seedLotSizes(bot), magicNumbers: bot.magicNumbers ?? [] } : {}),
+    ...(bot ? { ...bot, pairs: (bot.pairs || []).join(', '), lotSizes: seedLotSizes(bot), pairMagicNumbers: bot.pairMagicNumbers ?? {} } : {}),
   })
   const s = (k, v) => setF(p => ({ ...p, [k]: v }))
   const canSave = f.name.trim().length > 0
@@ -49,15 +49,20 @@ function BotForm({ bot, onSave, onClose }) {
     setF(p => ({ ...p, lotSizes: { ...p.lotSizes, [pair]: value === '' ? null : +value } }))
   }
 
-  function addMagicNumber(input) {
+  function addMagicNumber(pair, input) {
     const n = parseInt(input, 10)
-    if (!isNaN(n) && !f.magicNumbers.includes(n)) {
-      s('magicNumbers', [...f.magicNumbers, n])
-    }
+    if (isNaN(n)) return
+    const current = f.pairMagicNumbers[pair] ?? []
+    if (current.includes(n)) return
+    s('pairMagicNumbers', { ...f.pairMagicNumbers, [pair]: [...current, n] })
   }
 
-  function removeMagicNumber(n) {
-    s('magicNumbers', f.magicNumbers.filter(x => x !== n))
+  function removeMagicNumber(pair, n) {
+    const next = (f.pairMagicNumbers[pair] ?? []).filter(x => x !== n)
+    const updated = { ...f.pairMagicNumbers }
+    if (next.length === 0) delete updated[pair]
+    else updated[pair] = next
+    s('pairMagicNumbers', updated)
   }
 
   function handleSave() {
@@ -67,7 +72,9 @@ function BotForm({ bot, onSave, onClose }) {
       pairs: parsedPairs,
       lotSizes: Object.fromEntries(parsedPairs.map(p => [p, f.lotSizes[p] ?? null])),
       strategyDescription: f.strategyDescription,
-      magicNumbers: f.magicNumbers,
+      pairMagicNumbers: Object.fromEntries(
+        Object.entries(f.pairMagicNumbers).filter(([, magics]) => magics.length > 0)
+      ),
     })
   }
 
@@ -106,29 +113,38 @@ function BotForm({ bot, onSave, onClose }) {
           <label style={labelStyle}>Strategy description</label>
           <textarea style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} value={f.strategyDescription} onChange={e => s('strategyDescription', e.target.value)} placeholder="Placeholder — describe the bot's strategy here." />
         </div>
-        <div>
-          <label style={labelStyle}>Magic Numbers</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
-            {f.magicNumbers.map(n => (
-              <span key={n} style={{ fontSize: 12, padding: '2px 8px', borderRadius: 4, background: T.surface, border: `0.5px solid ${T.border}`, display: 'flex', alignItems: 'center', gap: 4 }}>
-                {n}
-                <button onClick={() => removeMagicNumber(n)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, lineHeight: 1, color: T.hint, padding: 0 }}>×</button>
-              </span>
-            ))}
+        {parsedPairs.length > 0 && (
+          <div>
+            <label style={labelStyle}>Magic Numbers (per pair)</label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {parsedPairs.map(pair => (
+                <div key={pair}>
+                  <div style={{ fontSize: 11, color: T.hint, marginBottom: 4 }}>{pair}</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 4 }}>
+                    {(f.pairMagicNumbers[pair] ?? []).map(n => (
+                      <span key={n} style={{ fontSize: 12, padding: '2px 8px', borderRadius: 4, background: T.surface, border: `0.5px solid ${T.border}`, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        #{n}
+                        <button onClick={() => removeMagicNumber(pair, n)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, lineHeight: 1, color: T.hint, padding: 0 }}>×</button>
+                      </span>
+                    ))}
+                  </div>
+                  <input
+                    style={inputStyle}
+                    type="number"
+                    placeholder={`Magic number for ${pair}`}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && e.target.value.trim()) {
+                        addMagicNumber(pair, e.target.value.trim())
+                        e.target.value = ''
+                        e.preventDefault()
+                      }
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
           </div>
-          <input
-            style={inputStyle}
-            type="number"
-            placeholder="Type a magic number and press Enter"
-            onKeyDown={e => {
-              if (e.key === 'Enter' && e.target.value.trim()) {
-                addMagicNumber(e.target.value.trim())
-                e.target.value = ''
-                e.preventDefault()
-              }
-            }}
-          />
-        </div>
+        )}
       </div>
     </Modal>
   )
@@ -160,13 +176,15 @@ export function BotsPage({ bots, onSave, onDelete }) {
               ))}
               {(bot.pairs || []).length === 0 && <span style={{ fontSize: 11, color: T.hint }}>No pairs set</span>}
             </div>
-            {(bot.magicNumbers ?? []).length > 0 && (
+            {Object.entries(bot.pairMagicNumbers ?? {}).some(([, m]) => m?.length > 0) && (
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-                {bot.magicNumbers.map(n => (
-                  <span key={n} style={{ fontSize: 11, padding: '1px 6px', borderRadius: 3, background: T.surface, border: `0.5px solid ${T.border}`, color: T.hint }}>
-                    #{n}
-                  </span>
-                ))}
+                {Object.entries(bot.pairMagicNumbers ?? {}).flatMap(([pair, magics]) =>
+                  (magics ?? []).map(n => (
+                    <span key={`${pair}-${n}`} style={{ fontSize: 11, padding: '1px 6px', borderRadius: 3, background: T.surface, border: `0.5px solid ${T.border}`, color: T.hint }}>
+                      {pair}: #{n}
+                    </span>
+                  ))
+                )}
               </div>
             )}
             <div style={{ fontSize: 12, color: T.hint, marginBottom: 8 }}>
