@@ -23,5 +23,8 @@ dist-ssr
 *.sln
 *.sw?
 
+# Test output
+test-results/
+
 # Excluding backups and processed trades
 data/
