@@ -26,9 +26,9 @@ export function parseQuantAnalyzerCsv(text, accountId) {
         OpenPrice:    cols[5],
         ClosePrice:   cols[6],
         Volume:       cols[3],
-        Commission:   cols[13],
-        Swap:         cols[12],
-        Profit:       cols[11],
+        Profit:       cols[14],   // net profit (already includes commission + swap)
+        Commission:   '0',
+        Swap:         '0',
         MagicNumber:  parseMagic(cols[20]),
         OrderComment: orderComment,
       }, accountId)

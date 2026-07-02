@@ -60,11 +60,13 @@ export function BotsAnalyticsPage({ bots, trades, accounts, onSaveBot, onDeleteB
           </button>
         ))}
         {botsWithoutTrades.map(bot => (
-          <button key={bot.id} style={{ ...sidebarItemStyle(false), color: T.hint, cursor: 'default' }}>
+          <button key={bot.id}
+            style={{ ...sidebarItemStyle(selectedId === bot.id), color: T.hint }}
+            onClick={() => setSelectedId(bot.id)}>
             {bot.name}
           </button>
         ))}
-        <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: `0.5px solid ${T.border}` }}>
+        <div style={{ marginTop: 24, paddingTop: 12, borderTop: `0.5px solid ${T.border}` }}>
           <button style={sidebarItemStyle(selectedId === 'manage')} onClick={() => setSelectedId('manage')}>
             Manage Bots
           </button>
@@ -105,20 +107,20 @@ function OverviewView({ botsWithTrades, tradesByBot, accounts }) {
     const seriesMap = {}
     for (const bot of botsWithTrades) {
       const series = computeCumulativePctSeries(tradesByBot[bot.id] ?? [], accounts)
-      seriesMap[bot.name] = Object.fromEntries(series.map(p => [p.date, p.pct]))
+      seriesMap[bot.id] = Object.fromEntries(series.map(p => [p.date, p.pct]))
     }
     // Collect all dates (reuse seriesMap instead of recomputing)
     const allDates = [...new Set(
-      botsWithTrades.flatMap(bot => Object.keys(seriesMap[bot.name] ?? {}))
+      botsWithTrades.flatMap(bot => Object.keys(seriesMap[bot.id] ?? {}))
     )].sort()
     // Forward-fill each bot's value across all dates
     const result = []
-    const lastVal = Object.fromEntries(botsWithTrades.map(b => [b.name, 0]))
+    const lastVal = Object.fromEntries(botsWithTrades.map(b => [b.id, 0]))
     for (const date of allDates) {
       const entry = { date }
       for (const bot of botsWithTrades) {
-        if (seriesMap[bot.name][date] !== undefined) lastVal[bot.name] = seriesMap[bot.name][date]
-        entry[bot.name] = lastVal[bot.name]
+        if (seriesMap[bot.id][date] !== undefined) lastVal[bot.id] = seriesMap[bot.id][date]
+        entry[bot.id] = lastVal[bot.id]
       }
       result.push(entry)
     }
@@ -167,7 +169,7 @@ function OverviewView({ botsWithTrades, tradesByBot, accounts }) {
                   // Best/worst day by %
                   const dayPct = {}
                   for (const t of botTrades) {
-                    const d = t.closeTime.slice(0, 10)
+                    const d = (t.closeTime ?? '').slice(0, 10)
                     dayPct[d] = (dayPct[d] ?? 0) + (t.pnl / (balanceFor[t.accountId] ?? 10000)) * 100
                   }
                   const dayVals = Object.values(dayPct)
@@ -204,7 +206,8 @@ function OverviewView({ botsWithTrades, tradesByBot, accounts }) {
               <Tooltip formatter={(v) => `${v.toFixed(2)}%`} contentStyle={{ background: T.card, border: `0.5px solid ${T.border}`, fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               {botsWithTrades.map((bot, i) => (
-                <Line key={bot.id} type="monotone" dataKey={bot.name} stroke={BOT_COLOURS[i % BOT_COLOURS.length]} dot={false} strokeWidth={2} />
+                <Line key={bot.id} type="monotone" dataKey={bot.id} name={bot.name}
+                  stroke={BOT_COLOURS[i % BOT_COLOURS.length]} dot={false} strokeWidth={2} />
               ))}
             </LineChart>
           </ResponsiveContainer>
@@ -325,7 +328,7 @@ function BotDetailView({ bot, trades, accounts }) {
                 const pct = (t.pnl / (acct?.initialBalance ?? 10000)) * 100
                 return (
                   <tr key={t.id} style={{ borderBottom: `0.5px solid ${T.border}` }}>
-                    <td style={{ padding: '6px 8px' }}>{t.closeTime.slice(0, 10)}</td>
+                    <td style={{ padding: '6px 8px' }}>{(t.closeTime ?? '').slice(0, 10)}</td>
                     <td style={{ padding: '6px 8px', color: T.hint }}>{acct?.label ?? t.accountId}</td>
                     <td style={{ padding: '6px 8px' }}>{t.symbol}</td>
                     <td style={{ padding: '6px 8px', color: t.direction === 'BUY' ? T.green : T.red }}>{t.direction}</td>
