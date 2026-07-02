@@ -1,11 +1,17 @@
 /**
- * Returns the bot whose magicNumbers array includes trade.magicNumber,
- * or null if the trade has no magic number or no bot is mapped.
+ * Returns { bot, pair } when trade.magicNumber is found in bot.pairMagicNumbers,
+ * or null if the trade has no magic number or no bot-pair mapping matches.
  * @param {import('./tradeSchema.js').Trade} trade
- * @param {Array<{magicNumbers?: number[]}>} bots
- * @returns {object|null}
+ * @param {Array<{pairMagicNumbers?: Record<string, number[]>}>} bots
+ * @returns {{ bot: object, pair: string } | null}
  */
 export function resolveBotForTrade(trade, bots) {
   if (trade.magicNumber == null) return null
-  return bots.find(b => (b.magicNumbers ?? []).includes(trade.magicNumber)) ?? null
+  for (const bot of bots) {
+    const map = bot.pairMagicNumbers ?? {}
+    for (const [pair, magics] of Object.entries(map)) {
+      if ((magics ?? []).includes(trade.magicNumber)) return { bot, pair }
+    }
+  }
+  return null
 }
