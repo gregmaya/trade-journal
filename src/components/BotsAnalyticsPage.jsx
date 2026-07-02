@@ -161,7 +161,7 @@ function OverviewView({ botsWithTrades, tradesByBot, accounts }) {
                   const netB = b.botTrades.reduce((s, t) => s + (t.pnl / (balanceFor[t.accountId] ?? 10000)) * 100, 0)
                   return netB - netA
                 })
-                .map(({ bot, stats, botTrades }, i) => {
+                .map(({ bot, stats, botTrades }, i) => (() => {
                   const netPct = botTrades.reduce((s, t) => s + (t.pnl / (balanceFor[t.accountId] ?? 10000)) * 100, 0)
                   const avgPct = botTrades.length ? netPct / botTrades.length : 0
                   // Best/worst day by %
@@ -185,7 +185,7 @@ function OverviewView({ botsWithTrades, tradesByBot, accounts }) {
                       <td style={{ padding: '8px 10px', textAlign: 'right', color: T.red }}>{worstDay.toFixed(2)}%</td>
                     </tr>
                   )
-                })}
+                })())
               })()}
             </tbody>
           </table>
