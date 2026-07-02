@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react'
 import { T, Card } from '../utils/theme.jsx'
 import { BotsPage } from './BotsPage.jsx'
 import { resolveBotForTrade } from '../utils/botUtils.js'
-import { computeStats, computeCumulativePctSeries } from '../utils/analytics.js'
+import { computeStats, computeCumulativePctSeries, computeHourHeatmap } from '../utils/analytics.js'
+import { HeatmapChart } from './HeatmapChart.jsx'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts'
@@ -301,6 +302,10 @@ function BotPairDetailView({ bot, pair, trades, accounts }) {
           </div>
         </Card>
       </div>
+
+      <Card style={{ padding: 16 }}>
+        <HeatmapChart cells={computeHourHeatmap(trades)} T={T} />
+      </Card>
 
       <Card style={{ padding: 16 }}>
         <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 10 }}>Trades ({trades.length})</div>
