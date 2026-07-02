@@ -13,18 +13,24 @@ export function BotsAnalyticsPage({ bots, trades, accounts, onSaveBot, onDeleteB
   const [selectedId, setSelectedId] = useState('overview')
 
   // Group trades by bot
-  const { tradesByBot, botsWithTrades, botsWithoutTrades } = useMemo(() => {
-    const map = {}
+  const { tradesByBot, tradesByBotPair, botsWithTrades, botsWithoutTrades } = useMemo(() => {
+    const byBot = {}
+    const byBotPair = {}
     for (const t of trades) {
-      const bot = resolveBotForTrade(t, bots)
-      if (!bot) continue
-      if (!map[bot.id]) map[bot.id] = []
-      map[bot.id].push(t)
+      const resolved = resolveBotForTrade(t, bots)
+      if (!resolved) continue
+      const { bot, pair } = resolved
+      if (!byBot[bot.id]) byBot[bot.id] = []
+      byBot[bot.id].push(t)
+      if (!byBotPair[bot.id]) byBotPair[bot.id] = {}
+      if (!byBotPair[bot.id][pair]) byBotPair[bot.id][pair] = []
+      byBotPair[bot.id][pair].push(t)
     }
     return {
-      tradesByBot: map,
-      botsWithTrades: bots.filter(b => map[b.id]?.length > 0),
-      botsWithoutTrades: bots.filter(b => !map[b.id]?.length),
+      tradesByBot: byBot,
+      tradesByBotPair: byBotPair,
+      botsWithTrades: bots.filter(b => byBot[b.id]?.length > 0),
+      botsWithoutTrades: bots.filter(b => !byBot[b.id]?.length),
     }
   }, [trades, bots])
 
@@ -88,6 +94,7 @@ export function BotsAnalyticsPage({ bots, trades, accounts, onSaveBot, onDeleteB
             <BotDetailView
               bot={bot}
               trades={tradesByBot[bot.id] ?? []}
+              tradesByPair={tradesByBotPair[bot.id] ?? {}}
               accounts={accounts}
             />
           )
@@ -219,7 +226,7 @@ function OverviewView({ botsWithTrades, tradesByBot, accounts }) {
 
 // ─── Per-bot detail ───────────────────────────────────────────────────────────
 
-function BotDetailView({ bot, trades, accounts }) {
+function BotDetailView({ bot, trades, tradesByPair, accounts }) {
   const stats = useMemo(() => computeStats(trades), [trades])
   const balanceFor = useMemo(() => Object.fromEntries(accounts.map(a => [a.id, a.initialBalance])), [accounts])
   const equitySeries = useMemo(() => computeCumulativePctSeries(trades, accounts), [trades, accounts])
@@ -241,9 +248,13 @@ function BotDetailView({ bot, trades, accounts }) {
           <div>
             <div style={{ fontSize: 18, fontWeight: 600 }}>{bot.name}</div>
             <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-              {(bot.magicNumbers ?? []).map(n => (
-                <span key={n} style={{ fontSize: 11, padding: '1px 7px', borderRadius: 3, background: T.surface, border: `0.5px solid ${T.border}`, color: T.hint }}>#{n}</span>
-              ))}
+              {Object.entries(bot.pairMagicNumbers ?? {}).flatMap(([pair, magics]) =>
+                (magics ?? []).map(n => (
+                  <span key={`${pair}-${n}`} style={{ fontSize: 11, padding: '1px 7px', borderRadius: 3, background: T.surface, border: `0.5px solid ${T.border}`, color: T.hint }}>
+                    {pair}: #{n}
+                  </span>
+                ))
+              )}
               {(bot.pairs ?? []).map(p => (
                 <span key={p} style={{ fontSize: 11, padding: '1px 7px', borderRadius: 3, background: T.indigoBg, color: T.indigo }}>{p}</span>
               ))}
@@ -309,6 +320,41 @@ function BotDetailView({ bot, trades, accounts }) {
           </div>
         </Card>
       </div>
+
+      {/* Per-pair breakdown */}
+      {Object.keys(tradesByPair).length > 0 && (
+        <Card style={{ padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 10 }}>Per-Pair Breakdown</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: `0.5px solid ${T.border}` }}>
+                  {['Pair', 'Trades', 'Win Rate', 'Net %', 'Avg % / Trade', 'Profit Factor'].map(h => (
+                    <th key={h} style={{ padding: '5px 8px', textAlign: h === 'Pair' ? 'left' : 'right', color: T.hint, fontWeight: 500 }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(tradesByPair).map(([pair, pairTrades]) => {
+                  const ps = computeStats(pairTrades)
+                  const netPct = pairTrades.reduce((s, t) => s + (t.pnl / (balanceFor[t.accountId] ?? 10000)) * 100, 0)
+                  const avgPct = pairTrades.length ? netPct / pairTrades.length : 0
+                  return (
+                    <tr key={pair} style={{ borderBottom: `0.5px solid ${T.border}` }}>
+                      <td style={{ padding: '6px 8px', fontWeight: 500 }}>{pair}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right' }}>{ps.total}</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right' }}>{(ps.winRate * 100).toFixed(1)}%</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right', color: netPct >= 0 ? T.green : T.red, fontWeight: 500 }}>{netPct >= 0 ? '+' : ''}{netPct.toFixed(2)}%</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right', color: avgPct >= 0 ? T.green : T.red }}>{avgPct >= 0 ? '+' : ''}{avgPct.toFixed(3)}%</td>
+                      <td style={{ padding: '6px 8px', textAlign: 'right' }}>{ps.profitFactor != null ? ps.profitFactor.toFixed(2) : '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {/* Trade table */}
       <Card style={{ padding: 16 }}>
