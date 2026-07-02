@@ -3,7 +3,7 @@ import { fsaSupported, openFile, createFile, readData, writeData, readLocalStora
 import { fmtDollars } from "./utils/compute.js";
 import { Mt5ImportModal } from "./components/Mt5ImportModal.jsx";
 import { Mt5AccountAnalytics } from "./components/Mt5AccountAnalytics.jsx";
-import { BotsPage } from "./components/BotsPage.jsx";
+import { BotsAnalyticsPage } from "./components/BotsAnalyticsPage.jsx";
 import { AccountsPage } from "./components/AccountsPage.jsx";
 import { T, btn, Card } from "./utils/theme.jsx";
 import { CrossAccountDashboard } from './components/CrossAccountDashboard.jsx';
@@ -326,7 +326,13 @@ export default function App() {
             fmtDollars={fmtDollars}
           />
         )}
-        {page==="bots"&&<BotsPage bots={data.bots||[]} onSave={saveBot} onDelete={deleteBot}/>}
+        {page==="bots"&&<BotsAnalyticsPage
+  bots={data.bots||[]}
+  trades={data.trades||[]}
+  accounts={mt5Accounts}
+  onSaveBot={saveBot}
+  onDeleteBot={deleteBot}
+/>}
         {page==="accounts"&&<AccountsPage accounts={mt5Accounts} onSaveOverride={saveAccountOverride} onSetDeprecated={setDeprecated}/>}
         {page==="settings"&&<SettingsPage data={data} onDataChange={setData}/>}
       </div>
