@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { T, btn, Card } from '../utils/theme.jsx'
+import { T, Card } from '../utils/theme.jsx'
 import { BotsPage } from './BotsPage.jsx'
 import { resolveBotForTrade } from '../utils/botUtils.js'
 import { computeStats, computeCumulativePctSeries } from '../utils/analytics.js'
@@ -13,7 +13,7 @@ export function BotsAnalyticsPage({ bots, trades, accounts, onSaveBot, onDeleteB
   const [selectedId, setSelectedId] = useState('overview')
 
   // Group trades by bot
-  const tradesByBot = useMemo(() => {
+  const { tradesByBot, botsWithTrades, botsWithoutTrades } = useMemo(() => {
     const map = {}
     for (const t of trades) {
       const bot = resolveBotForTrade(t, bots)
@@ -21,11 +21,12 @@ export function BotsAnalyticsPage({ bots, trades, accounts, onSaveBot, onDeleteB
       if (!map[bot.id]) map[bot.id] = []
       map[bot.id].push(t)
     }
-    return map
+    return {
+      tradesByBot: map,
+      botsWithTrades: bots.filter(b => map[b.id]?.length > 0),
+      botsWithoutTrades: bots.filter(b => !map[b.id]?.length),
+    }
   }, [trades, bots])
-
-  const botsWithTrades = bots.filter(b => tradesByBot[b.id]?.length > 0)
-  const botsWithoutTrades = bots.filter(b => !tradesByBot[b.id]?.length)
 
   const sidebarItemStyle = (active) => ({
     padding: '7px 12px',
@@ -63,7 +64,7 @@ export function BotsAnalyticsPage({ bots, trades, accounts, onSaveBot, onDeleteB
             {bot.name}
           </button>
         ))}
-        <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: `0.5px solid ${T.border}`, marginTop: 16 }}>
+        <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: `0.5px solid ${T.border}` }}>
           <button style={sidebarItemStyle(selectedId === 'manage')} onClick={() => setSelectedId('manage')}>
             Manage Bots
           </button>
@@ -73,7 +74,7 @@ export function BotsAnalyticsPage({ bots, trades, accounts, onSaveBot, onDeleteB
       {/* Main content */}
       <div style={{ flex: 1, minWidth: 0 }}>
         {selectedId === 'overview' && (
-          <OverviewView bots={bots} tradesByBot={tradesByBot} accounts={accounts} />
+          <OverviewView botsWithTrades={botsWithTrades} tradesByBot={tradesByBot} accounts={accounts} />
         )}
         {selectedId === 'manage' && (
           <BotsPage bots={bots} onSave={onSaveBot} onDelete={onDeleteBot} />
@@ -96,9 +97,7 @@ export function BotsAnalyticsPage({ bots, trades, accounts, onSaveBot, onDeleteB
 
 // ─── Overview ────────────────────────────────────────────────────────────────
 
-function OverviewView({ bots, tradesByBot, accounts }) {
-  const botsWithTrades = bots.filter(b => tradesByBot[b.id]?.length > 0)
-
+function OverviewView({ botsWithTrades, tradesByBot, accounts }) {
   // Build multi-bot equity curve data for Recharts
   const equityData = useMemo(() => {
     if (botsWithTrades.length === 0) return []
@@ -108,11 +107,9 @@ function OverviewView({ bots, tradesByBot, accounts }) {
       const series = computeCumulativePctSeries(tradesByBot[bot.id] ?? [], accounts)
       seriesMap[bot.name] = Object.fromEntries(series.map(p => [p.date, p.pct]))
     }
-    // Collect all dates
+    // Collect all dates (reuse seriesMap instead of recomputing)
     const allDates = [...new Set(
-      botsWithTrades.flatMap(bot =>
-        (computeCumulativePctSeries(tradesByBot[bot.id] ?? [], accounts)).map(p => p.date)
-      )
+      botsWithTrades.flatMap(bot => Object.keys(seriesMap[bot.name] ?? {}))
     )].sort()
     // Forward-fill each bot's value across all dates
     const result = []
@@ -155,15 +152,16 @@ function OverviewView({ bots, tradesByBot, accounts }) {
               </tr>
             </thead>
             <tbody>
-              {botsWithTrades
+              {(() => {
+                const balanceFor = Object.fromEntries(accounts.map(a => [a.id, a.initialBalance]))
+                return botsWithTrades
                 .map(bot => ({ bot, stats: computeStats(tradesByBot[bot.id] ?? []), botTrades: tradesByBot[bot.id] ?? [] }))
                 .sort((a, b) => {
-                  const netA = a.botTrades.reduce((s, t) => s + (t.pnl / (accounts.find(ac => ac.id === t.accountId)?.initialBalance ?? 10000)) * 100, 0)
-                  const netB = b.botTrades.reduce((s, t) => s + (t.pnl / (accounts.find(ac => ac.id === t.accountId)?.initialBalance ?? 10000)) * 100, 0)
+                  const netA = a.botTrades.reduce((s, t) => s + (t.pnl / (balanceFor[t.accountId] ?? 10000)) * 100, 0)
+                  const netB = b.botTrades.reduce((s, t) => s + (t.pnl / (balanceFor[t.accountId] ?? 10000)) * 100, 0)
                   return netB - netA
                 })
                 .map(({ bot, stats, botTrades }, i) => {
-                  const balanceFor = Object.fromEntries(accounts.map(a => [a.id, a.initialBalance]))
                   const netPct = botTrades.reduce((s, t) => s + (t.pnl / (balanceFor[t.accountId] ?? 10000)) * 100, 0)
                   const avgPct = botTrades.length ? netPct / botTrades.length : 0
                   // Best/worst day by %
@@ -183,11 +181,12 @@ function OverviewView({ bots, tradesByBot, accounts }) {
                       <td style={{ padding: '8px 10px', textAlign: 'right', color: netPct >= 0 ? T.green : T.red, fontWeight: 500 }}>{netPct.toFixed(2)}%</td>
                       <td style={{ padding: '8px 10px', textAlign: 'right', color: avgPct >= 0 ? T.green : T.red }}>{avgPct.toFixed(3)}%</td>
                       <td style={{ padding: '8px 10px', textAlign: 'right' }}>{stats.profitFactor != null ? stats.profitFactor.toFixed(2) : '—'}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', color: T.green }}>+{bestDay.toFixed(2)}%</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', color: T.green }}>{bestDay >= 0 ? '+' : ''}{bestDay.toFixed(2)}%</td>
                       <td style={{ padding: '8px 10px', textAlign: 'right', color: T.red }}>{worstDay.toFixed(2)}%</td>
                     </tr>
                   )
                 })}
+              })()}
             </tbody>
           </table>
         </div>
@@ -294,9 +293,9 @@ function BotDetailView({ bot, trades, accounts }) {
             {[
               { label: 'Wins', value: stats.winCount, color: T.green },
               { label: 'Losses', value: stats.lossCount, color: T.red },
-              { label: 'Avg Win %', value: `+${avgWinPct.toFixed(3)}%`, color: T.green },
+              { label: 'Avg Win %', value: `${avgWinPct >= 0 ? '+' : ''}${avgWinPct.toFixed(3)}%`, color: T.green },
               { label: 'Avg Loss %', value: `-${avgLossPct.toFixed(3)}%`, color: T.red },
-              { label: 'Best Trade %', value: `+${bestTradePct.toFixed(2)}%`, color: T.green },
+              { label: 'Best Trade %', value: `${bestTradePct >= 0 ? '+' : ''}${bestTradePct.toFixed(2)}%`, color: T.green },
               { label: 'Worst Trade %', value: `${worstTradePct.toFixed(2)}%`, color: T.red },
             ].map(({ label, value, color }) => (
               <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
